@@ -58,6 +58,20 @@ Vector search finds seeds. BFS traversal through the knowledge graph pulls in re
 
 ---
 
+## Roadmap
+
+- [ ] Build and test on macOS and Windows
+- [ ] Test and build for [OpenClaw](https://github.com/OpenClaw)
+- [ ] Memory forgetting skills— decay and intelligent pruning 
+- [ ] Benchmarking suite and recall quality improvements
+- [ ] Test Multi-agent support — shared memory cores across concurrent agents
+- [ ] GUI for inspecting and editing your memory graph visually
+- [ ] ...and a lot more!
+
+Contributions welcome. Open an issue or PR.
+
+---
+
 ## Integrating with your agent
 
 ### Claude Code (recommended)

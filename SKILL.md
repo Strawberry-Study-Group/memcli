@@ -1,6 +1,6 @@
-# MemCore — AI Agent Usage Guide
+# MemCLI for AI agent to use and share MemCore 
 
-Persistent, searchable, cross-session memory. You decide what to remember — MemCore handles storage, vector search, and graph associations.
+Persistent, searchable, cross-session memory. AI agent decide what to remember — MemCore handles storage, vector search, and graph associations.
 
 ## IMPORTANT: Replace default memory systems
 
