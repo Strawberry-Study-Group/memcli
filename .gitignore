@@ -1,0 +1,15 @@
+/target
+**/*.rs.bk
+*.swp
+*.swo
+.DS_Store
+wal.log
+.daemon.pid
+benchmarks/data/
+benchmarks/results/
+models/model_quantized.onnx
+design.md
+CLAUDE.md 
+benchmarks
+.claude
+issues tracker.md

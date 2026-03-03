@@ -1,0 +1,48 @@
+[package]
+name = "memcore"
+version = "0.1.0"
+edition = "2024"
+description = "Non-parametric memory core for AI agents"
+license = "MIT"
+keywords = ["memory", "ai-agent", "semantic-search", "cli", "llm"]
+categories = ["command-line-utilities", "database"]
+readme = "README.md"
+
+[[bin]]
+name = "memcore"
+path = "src/main.rs"
+
+[features]
+default = []
+embedding = ["ort", "tokenizers"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tempfile = "3"
+tokio = { version = "1", features = ["full"] }
+chrono = { version = "0.4", features = ["serde"] }
+xxhash-rust = { version = "0.8", features = ["xxh64"] }
+regex = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+toml = "0.8"
+dirs = "5"
+anyhow = "1"
+
+# Heavy deps — optional until embedding is implemented
+ort = { version = "2.0.0-rc.11", optional = true }
+tokenizers = { version = "0.22", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+assert_cmd = "2"
+predicates = "3"
+
+[profile.release]
+lto = true
+strip = true
+opt-level = "z"
