@@ -1,12 +1,12 @@
-# MemCore
+# MemClI for shareable MemCore
 
-**Persistent memory CLI tool for any AI agent. ~40 MB. No cloud. No dependencies. Just run it.**
+**Persistent memory CLI tool for any AI agent. ~40 MB. 100% local. No dependencies. Just run it and use copy paste to share.**
 
 MemCore is a local CLI + daemon that gives AI agents persistent, searchable, graph-linked memory across sessions. Any agent that can run shell commands — Claude, GPT, Gemini, Cursor, your own scripts — gets a brain that remembers everything.
 
 
 ## Get started in 60 seconds
-[**Download the release**](../../releases) — unzip,
+[**Download the release**](https://github.com/Strawberry-Study-Group/memcli/releases/tag/v0.0.1/), unzip it,
 
 place in you project folder.
 
