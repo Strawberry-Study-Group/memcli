@@ -32,7 +32,7 @@ pub enum Request {
         op: PatchRequest,
     },
     Delete {
-        name: String,
+        names: Vec<String>,
     },
     Rename {
         old: String,
@@ -53,6 +53,8 @@ pub enum Request {
         name_prefix: Option<String>,
         top_k: usize,
         depth: usize,
+        #[serde(default)]
+        full: bool,
     },
     Search {
         query: String,
@@ -66,6 +68,8 @@ pub enum Request {
         queries: Vec<String>,
         top_k: usize,
         depth: usize,
+        #[serde(default)]
+        full: bool,
     },
     Neighbors {
         name: String,

@@ -251,7 +251,7 @@ async fn test_roundtrip_create_delete() {
         port,
         &nonce,
         &Request::Delete {
-            name: "temp-node".into(),
+            names: vec!["temp-node".into()],
         },
     )
     .await

@@ -59,15 +59,17 @@ fn build_request(command: Commands) -> anyhow::Result<Request> {
                     new: parts[1].clone(),
                 }
             } else if let Some(text) = append {
+                let text = if text.is_empty() { read_content(None)? } else { text };
                 PatchRequest::Append(text)
             } else if let Some(text) = prepend {
+                let text = if text.is_empty() { read_content(None)? } else { text };
                 PatchRequest::Prepend(text)
             } else {
                 anyhow::bail!("patch requires --replace, --append, or --prepend");
             };
             Ok(Request::Patch { name, op })
         }
-        Commands::Delete { name } => Ok(Request::Delete { name }),
+        Commands::Delete { names } => Ok(Request::Delete { names }),
         Commands::Rename { old, new } => Ok(Request::Rename { old, new }),
         Commands::Ls { sort } => {
             let sort = match sort.to_lowercase().as_str() {
@@ -91,11 +93,13 @@ fn build_request(command: Commands) -> anyhow::Result<Request> {
             top_k,
             depth,
             name,
+            full,
         } => Ok(Request::Recall {
             query,
             name_prefix: name,
             top_k,
             depth,
+            full,
         }),
         Commands::Search { query, top_k } => Ok(Request::Search { query, top_k }),
         Commands::MultiSearch { queries, top_k } => Ok(Request::MultiSearch { queries, top_k }),
@@ -103,10 +107,12 @@ fn build_request(command: Commands) -> anyhow::Result<Request> {
             queries,
             top_k,
             depth,
+            full,
         } => Ok(Request::MultiRecall {
             queries,
             top_k,
             depth,
+            full,
         }),
         Commands::Neighbors {
             name,

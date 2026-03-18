@@ -25,7 +25,7 @@ pub fn handle_request(
             handle_update(state, name, content, &memories_dir, base_dir)
         }
         Request::Patch { name, op } => handle_patch(state, name, op, &memories_dir),
-        Request::Delete { name } => handle_delete(state, name, &memories_dir, base_dir),
+        Request::Delete { names } => handle_delete(state, names, &memories_dir, base_dir),
         Request::Rename { old, new } => handle_rename(state, old, new, &memories_dir, base_dir),
         Request::Ls { sort } => handle_ls(state, *sort),
         Request::Link { a, b } => handle_link(state, a, b, &memories_dir, base_dir),
@@ -51,12 +51,14 @@ pub fn handle_request(
             name_prefix,
             top_k,
             depth,
-        } => handle_recall(state, query, name_prefix, *top_k, *depth),
+            full,
+        } => handle_recall(state, query, name_prefix, *top_k, *depth, *full),
         Request::MultiRecall {
             queries,
             top_k,
             depth,
-        } => handle_multi_recall(state, queries, *top_k, *depth),
+            full,
+        } => handle_multi_recall(state, queries, *top_k, *depth, *full),
         Request::Status => handle_status(state),
         Request::Inspect { node: Some(name), format, .. } => handle_inspect_node(state, name, format),
         Request::Inspect { node: None, format, threshold, cap } => handle_inspect(state, format, *threshold, *cap),
@@ -424,50 +426,74 @@ fn handle_patch(
 
 fn handle_delete(
     state: &mut DaemonState,
-    name: &str,
+    names: &[String],
     memories_dir: &Path,
     base_dir: &Path,
 ) -> Response {
-    if !state.name_index.contains(name) {
-        return Response::user_error(format!("node '{}' not found", name));
-    }
-
-    let tx_id = match state.wal.begin(&WalOp::Delete(name.to_string())) {
-        Ok(id) => id,
-        Err(e) => return Response::system_error(format!("WAL error: {}", e)),
-    };
-
-    // Get neighbors before removing
-    let neighbors = state.graph.remove_node(name);
-
-    // Update peer in-memory state
-    for neighbor in &neighbors {
-        if let Some(peer) = state.node_metas.get_mut(neighbor) {
-            peer.links.retain(|l| l != name);
+    // Validate all names exist first
+    let mut not_found: Vec<&str> = Vec::new();
+    for name in names {
+        if !state.name_index.contains(name) {
+            not_found.push(name);
         }
     }
-
-    // Remove from indices
-    state.name_index.remove(name);
-    state.node_metas.remove(name);
-    state.vector_index.remove(name);
-
-    // Update peer .md files
-    for neighbor in &neighbors {
-        update_peer_links_on_disk(memories_dir, neighbor, name, false);
+    if !not_found.is_empty() {
+        return Response::user_error(format!(
+            "node(s) not found: {}",
+            not_found.join(", ")
+        ));
     }
 
-    // Delete the file
-    let _ = node::delete_node_from_dir(memories_dir, name);
+    let mut total_edges = 0;
+    let mut deleted = 0;
+
+    for name in names {
+        let tx_id = match state.wal.begin(&WalOp::Delete(name.to_string())) {
+            Ok(id) => id,
+            Err(e) => return Response::system_error(format!("WAL error: {}", e)),
+        };
+
+        // Get neighbors before removing
+        let neighbors = state.graph.remove_node(name);
+        total_edges += neighbors.len();
+
+        // Update peer in-memory state
+        for neighbor in &neighbors {
+            if let Some(peer) = state.node_metas.get_mut(neighbor) {
+                peer.links.retain(|l| l != name);
+            }
+        }
+
+        // Remove from indices
+        state.name_index.remove(name);
+        state.node_metas.remove(name);
+        state.vector_index.remove(name);
+
+        // Update peer .md files
+        for neighbor in &neighbors {
+            update_peer_links_on_disk(memories_dir, neighbor, name, false);
+        }
+
+        // Delete the file
+        let _ = node::delete_node_from_dir(memories_dir, name);
+
+        let _ = state.wal.commit(&tx_id);
+        deleted += 1;
+    }
 
     let _ = save_graph_idx(base_dir, &state.graph);
-    let _ = state.wal.commit(&tx_id);
 
-    Response::ok(ResponseBody::Message(format!(
-        "deleted: {} [{} edges removed]",
-        name,
-        neighbors.len()
-    )))
+    if deleted == 1 {
+        Response::ok(ResponseBody::Message(format!(
+            "deleted: {} [{} edges removed]",
+            names[0], total_edges
+        )))
+    } else {
+        Response::ok(ResponseBody::Message(format!(
+            "deleted: {} nodes [{} edges removed]",
+            deleted, total_edges
+        )))
+    }
 }
 
 // ============================================================
@@ -943,6 +969,7 @@ fn handle_multi_recall(
     queries: &[String],
     top_k: usize,
     depth: usize,
+    full: bool,
 ) -> Response {
     #[cfg(feature = "embedding")]
     {
@@ -969,13 +996,26 @@ fn handle_multi_recall(
             top_k,
             depth,
         );
+        if full {
+            let results: Vec<SearchResultEntry> = recall_results
+                .into_iter()
+                .map(|r| SearchResultEntry {
+                    node_name: r.node_name,
+                    score: r.score,
+                    similarity: r.similarity,
+                    weight: r.weight,
+                    abstract_text: r.abstract_text,
+                })
+                .collect();
+            return Response::ok(ResponseBody::SearchResults(results));
+        }
         let names: Vec<String> = recall_results.into_iter().map(|r| r.node_name).collect();
         return Response::ok(ResponseBody::NodeNames(names));
     }
 
     #[cfg(not(feature = "embedding"))]
     {
-        let _ = (state, queries, top_k, depth);
+        let _ = (state, queries, top_k, depth, full);
         Response::system_error("multi-recall requires embedding feature — rebuild with: cargo build --features embedding".into())
     }
 }
@@ -990,11 +1030,17 @@ fn handle_recall(
     name_prefix: &Option<String>,
     top_k: usize,
     depth: usize,
+    full: bool,
 ) -> Response {
     // Name prefix mode
     if let Some(prefix) = name_prefix {
         let matches = state.name_index.prefix_search(prefix);
         let names: Vec<String> = matches.into_iter().take(top_k).map(|n| n.to_string()).collect();
+        if full {
+            return Response::ok(ResponseBody::SearchResults(
+                names_to_search_results(&names, &state.node_metas),
+            ));
+        }
         return Response::ok(ResponseBody::NodeNames(names));
     }
 
@@ -1019,13 +1065,26 @@ fn handle_recall(
                 top_k,
                 depth,
             );
+            if full {
+                let results: Vec<SearchResultEntry> = recall_results
+                    .into_iter()
+                    .map(|r| SearchResultEntry {
+                        node_name: r.node_name,
+                        score: r.score,
+                        similarity: r.similarity,
+                        weight: r.weight,
+                        abstract_text: r.abstract_text,
+                    })
+                    .collect();
+                return Response::ok(ResponseBody::SearchResults(results));
+            }
             let names: Vec<String> = recall_results.into_iter().map(|r| r.node_name).collect();
             return Response::ok(ResponseBody::NodeNames(names));
         }
 
         #[cfg(not(feature = "embedding"))]
         {
-            let _ = (query_text, depth);
+            let _ = (query_text, depth, full);
             return Response::system_error("recall with query requires embedding feature — rebuild with: cargo build --features embedding".into());
         }
     }
@@ -1057,7 +1116,32 @@ fn handle_recall(
     }
 
     names.truncate(top_k);
+    if full {
+        return Response::ok(ResponseBody::SearchResults(
+            names_to_search_results(&names, &state.node_metas),
+        ));
+    }
     Response::ok(ResponseBody::NodeNames(names))
+}
+
+/// Helper: convert a name list to SearchResultEntry with metadata from node_metas.
+fn names_to_search_results(
+    names: &[String],
+    node_metas: &std::collections::HashMap<String, NodeMeta>,
+) -> Vec<SearchResultEntry> {
+    names
+        .iter()
+        .map(|name| {
+            let meta = node_metas.get(name);
+            SearchResultEntry {
+                node_name: name.clone(),
+                score: meta.map(|m| m.weight).unwrap_or(0.0),
+                similarity: 0.0,
+                weight: meta.map(|m| m.weight).unwrap_or(0.0),
+                abstract_text: meta.map(|m| m.abstract_text.clone()).unwrap_or_default(),
+            }
+        })
+        .collect()
 }
 
 // ============================================================
@@ -1168,7 +1252,10 @@ fn handle_inspect(state: &DaemonState, format: &OutputFormat, threshold: Option<
         0.0
     };
 
-    // Simplified health (without redundancy and retrieval degradation)
+    // Health score: penalize bad signals, don't reward raw connectivity.
+    // Weights: orphan 0.10, graveyard 0.25, density_imbalance 0.10.
+    // Orphan and density weights are deliberately low so that linking
+    // unrelated nodes doesn't significantly inflate the score.
     let density_imbalance = if node_count <= 1 {
         0.0 // Not meaningful for 0-1 nodes
     } else if density < 1.5 {
@@ -1180,7 +1267,7 @@ fn handle_inspect(state: &DaemonState, format: &OutputFormat, threshold: Option<
     };
 
     let health = 1.0
-        - (0.20 * orphan_ratio + 0.20 * graveyard_ratio + 0.15 * density_imbalance);
+        - (0.10 * orphan_ratio + 0.25 * graveyard_ratio + 0.10 * density_imbalance);
 
     let orphans: Vec<String> = state
         .node_metas

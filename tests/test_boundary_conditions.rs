@@ -542,6 +542,7 @@ fn test_recall_empty_with_query() {
         name_prefix: None,
         top_k: 5,
         depth: 1,
+        full: false,
     };
     let resp = handle_request(&mut state, &req, dir.path());
     assert!(!resp.success);
@@ -577,7 +578,7 @@ fn test_gc_dangling_links_persisted_to_disk() {
 
     // Delete beta (will remove beta's file but alpha's .md still references beta in-memory)
     let req = Request::Delete {
-        name: "beta".into(),
+        names: vec!["beta".into()],
     };
     let resp = handle_request(&mut state, &req, dir.path());
     assert!(resp.success);
@@ -795,6 +796,7 @@ fn test_recall_working_memory_pinned_not_dropped() {
         name_prefix: None,
         top_k: 2,
         depth: 1,
+        full: false,
     };
     let resp = handle_request(&mut state, &req, dir.path());
     assert!(resp.success);
@@ -949,7 +951,7 @@ fn test_delete_empty_system() {
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
     let req = Request::Delete {
-        name: "nonexistent".into(),
+        names: vec!["nonexistent".into()],
     };
     let resp = handle_request(&mut state, &req, dir.path());
     assert!(!resp.success);
@@ -1048,7 +1050,7 @@ fn test_gc_cleans_after_delete() {
 
     // Delete beta through handler (clean delete updates alpha's links)
     let req = Request::Delete {
-        name: "beta".into(),
+        names: vec!["beta".into()],
     };
     let resp = handle_request(&mut state, &req, dir.path());
     assert!(resp.success);
@@ -1105,6 +1107,7 @@ fn test_recall_name_prefix_returns_matches() {
         name_prefix: Some("project-".into()),
         top_k: 10,
         depth: 1,
+        full: false,
     };
     let resp = handle_request(&mut state, &req, dir.path());
     assert!(resp.success);
@@ -1133,6 +1136,7 @@ fn test_recall_name_prefix_empty_system() {
         name_prefix: Some("anything".into()),
         top_k: 10,
         depth: 1,
+        full: false,
     };
     let resp = handle_request(&mut state, &req, dir.path());
     assert!(resp.success);
@@ -1159,6 +1163,7 @@ fn test_recall_working_memory_empty_system() {
         name_prefix: None,
         top_k: 10,
         depth: 1,
+        full: false,
     };
     let resp = handle_request(&mut state, &req, dir.path());
     assert!(resp.success);

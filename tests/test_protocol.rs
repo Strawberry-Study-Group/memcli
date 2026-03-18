@@ -70,6 +70,7 @@ fn test_encode_decode_request_recall() {
         name_prefix: None,
         top_k: 5,
         depth: 2,
+        full: false,
     };
     let bytes = encode_message(&req).unwrap();
     let decoded: Request = decode_message(&bytes[4..]).unwrap();
@@ -79,11 +80,13 @@ fn test_encode_decode_request_recall() {
             name_prefix,
             top_k,
             depth,
+            full,
         } => {
             assert_eq!(query.unwrap(), "async python");
             assert!(name_prefix.is_none());
             assert_eq!(top_k, 5);
             assert_eq!(depth, 2);
+            assert!(!full);
         }
         _ => panic!("wrong variant"),
     }
@@ -93,7 +96,7 @@ fn test_encode_decode_request_recall() {
 fn test_encode_decode_all_simple_requests() {
     let requests = vec![
         Request::Delete {
-            name: "old".into(),
+            names: vec!["old".into()],
         },
         Request::Rename {
             old: "a".into(),

@@ -6,12 +6,14 @@ MemCore is a local CLI + daemon that gives AI agents persistent, searchable, gra
 
 
 ## Get started in 60 seconds
-[**Download the release**](https://github.com/Strawberry-Study-Group/memcli/releases/tag/v0.0.1/), unzip it,
 
-place in you project folder.
+[**Download the release**](https://github.com/Strawberry-Study-Group/memcli/releases/tag/v0.0.1/), unzip it, place in your project folder.
 
-then  just start your AI agent and tell you agent:
-"can you read @default_memcore/skill.md can set up memcore for me?"
+Then just tell your AI agent:
+
+> "Can you read `@<your-memcore-dir>/setup.md` and set up memcore for me?"
+
+The agent reads the setup guide, configures hooks, and verifies everything works. After that, it uses memcore automatically every session.
 
 ---
 
@@ -72,56 +74,25 @@ Contributions welcome. Open an issue or PR.
 
 ---
 
-## Integrating with your agent
+## Skill files
 
-### Claude Code (recommended)
+The release includes three skill files. Each serves a different purpose:
 
-Add hooks to auto-inject memories at session start and after context compaction:
+| File | Purpose | When used |
+|------|---------|-----------|
+| `setup.md` | One-time setup guide — env var, hooks, verification | Agent reads this once during initial setup |
+| `skill.md` | Runtime skill — how to use memcore while working | Injected automatically every session via hook |
+| `sleep.md` | Memory consolidation — organizing and pruning | Invoked manually during idle time ("consolidate your memories") |
 
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "startup",
-        "hooks": [{ "type": "command", "command": "cat \"$MEMCORE_DIR/skill.md\" && memcore recall --top-k 7" }]
-      },
-      {
-        "matcher": "compact",
-        "hooks": [{ "type": "command", "command": "cat \"$MEMCORE_DIR/skill.md\" && memcore recall --top-k 7" }]
-      }
-    ]
-  }
-}
-```
+Only `skill.md` goes in the hook. It's kept lean so it doesn't waste tokens. Setup instructions and sleep procedures are separate files the agent reads only when needed.
 
-Add to `~/.claude/settings.json` (all projects) or `.claude/settings.json` (one project).
+### Claude Code
 
-- **startup** — loads the skill doc so the agent knows how to use memcore, then injects the top 7 relevant memories
-- **compact** — re-injects both when the context window compresses, so the agent never loses memory or skill knowledge mid-session
+After running setup, hooks auto-inject `skill.md` + recent memories on every session start and context compaction. See `setup.md` for the exact hook config.
 
 ### Any other agent
 
-MemCore is a plain CLI — any agent that can run shell commands can use it:
-
-```bash
-# Before starting work: load relevant context
-memcore recall "topic of current task" --top-k 5
-
-# Learned something useful: store it immediately
-memcore create "node name" -f memory.md
-
-# That memory helped: reinforce it
-memcore boost "node name"
-
-# That memory misled you: decay it
-memcore penalize "node name"
-
-# At session end: check working memory
-memcore recall
-```
-
-The `skill.md` file included in the release is a ready-made prompt document you can inject into any agent's system prompt to teach it how to use MemCore.
+Inject the contents of `skill.md` into your agent's system prompt and set the appropriate env var (e.g. `WORK_MEMCORE_DIR` for a directory named `work_memcore`). Any agent that can run shell commands can use memcore. See `setup.md` for the naming convention.
 
 ---
 
@@ -200,7 +171,7 @@ memcore stop                           # gracefully stop the daemon
 
 ## Node format
 
-Every memory is a plain markdown file in `~/.memcore/memories/`. You can read and edit them directly.
+Every memory is a plain markdown file in `memories/` inside your memcore directory. You can read and edit them directly.
 
 **Minimal input** — the system fills in everything else:
 
@@ -259,7 +230,7 @@ Near-duplicates are worth merging. Orphans and low-weight nodes are candidates f
 ## Configuration
 
 ```toml
-# ~/.memcore/memcore.toml
+# memcore.toml (in your memcore directory)
 
 [weight]
 boost_amount = 0.1        # additive boost per positive feedback
@@ -277,7 +248,7 @@ idle_timeout_minutes = 30 # auto-exit after idle
 port = 0                  # 0 = auto-assign
 ```
 
-Override base directory via env var: `MEMCORE_DIR=/custom/path memcore <cmd>`
+Set the base directory via env var derived from your directory name (e.g. `export WORK_MEMCORE_DIR="/path/to/work_memcore"`). `MEMCORE_DIR` also works as a generic override.
 
 ---
 

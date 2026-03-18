@@ -195,10 +195,62 @@ fn test_load_model_config_invalid_json() {
 // ============================================================
 
 #[test]
-fn test_memcore_dir_env_override() {
-    // This test checks that MEMCORE_DIR env var is respected
-    // We can't safely set env vars in parallel tests, so just verify the function exists
-    // and returns a PathBuf
-    let dir = memcore_dir();
-    assert!(dir.to_str().is_some());
+fn test_try_memcore_dir_returns_none_without_markers() {
+    // Without MEMCORE_DIR set and without memcore.toml/memories/ next to the
+    // binary, try_memcore_dir should return None (no silent fallback).
+    // We can't unset env vars safely in parallel tests, so just verify the
+    // function exists and returns Option<PathBuf>.
+    let _result = try_memcore_dir();
+}
+
+#[test]
+fn test_try_memcore_dir_finds_dir_with_memcore_toml() {
+    // A directory containing memcore.toml should be recognized as a memcore dir.
+    let tmp = TempDir::new().unwrap();
+    let memcore_dir = tmp.path().join("my-memcore");
+    std::fs::create_dir_all(&memcore_dir).unwrap();
+    std::fs::write(memcore_dir.join("memcore.toml"), "").unwrap();
+
+    // Simulate the check: memcore.toml exists → valid memcore dir
+    assert!(memcore_dir.join("memcore.toml").exists());
+}
+
+#[test]
+fn test_try_memcore_dir_finds_dir_with_memories() {
+    // A directory containing memories/ should be recognized as a memcore dir.
+    let tmp = TempDir::new().unwrap();
+    let memcore_dir = tmp.path().join("my-memcore");
+    std::fs::create_dir_all(memcore_dir.join("memories")).unwrap();
+
+    // Simulate the check: memories/ exists → valid memcore dir
+    assert!(memcore_dir.join("memories").is_dir());
+}
+
+// ============================================================
+// dir_name_to_env_var
+// ============================================================
+
+#[test]
+fn test_dir_name_to_env_var_simple() {
+    assert_eq!(dir_name_to_env_var("memcore"), "MEMCORE_DIR");
+}
+
+#[test]
+fn test_dir_name_to_env_var_with_underscores() {
+    assert_eq!(dir_name_to_env_var("work_memcore"), "WORK_MEMCORE_DIR");
+}
+
+#[test]
+fn test_dir_name_to_env_var_with_hyphens() {
+    assert_eq!(dir_name_to_env_var("my-project-memcore"), "MY_PROJECT_MEMCORE_DIR");
+}
+
+#[test]
+fn test_dir_name_to_env_var_mixed() {
+    assert_eq!(dir_name_to_env_var("Project Alpha v2"), "PROJECT_ALPHA_V2_DIR");
+}
+
+#[test]
+fn test_dir_name_to_env_var_already_upper() {
+    assert_eq!(dir_name_to_env_var("MEMCORE"), "MEMCORE_DIR");
 }

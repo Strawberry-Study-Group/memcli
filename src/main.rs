@@ -3,6 +3,8 @@ mod config;
 mod daemon;
 mod daemon_state;
 mod feedback;
+#[cfg(all(feature = "embedding", target_os = "linux"))]
+mod glibc_compat;
 mod graph;
 mod handler;
 mod index;
@@ -66,18 +68,19 @@ enum Commands {
         /// Replace old text with new text
         #[arg(long, num_args = 2)]
         replace: Option<Vec<String>>,
-        /// Append text to body
-        #[arg(long)]
+        /// Append text to body (reads from stdin if no value given)
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
         append: Option<String>,
-        /// Prepend text to body
-        #[arg(long)]
+        /// Prepend text to body (reads from stdin if no value given)
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
         prepend: Option<String>,
     },
 
-    /// Delete a memory node (irreversible)
+    /// Delete one or more memory nodes (irreversible)
     Delete {
-        /// Node name
-        name: String,
+        /// Node name(s)
+        #[arg(required = true)]
+        names: Vec<String>,
     },
 
     /// Rename a node (preserves all metadata)
@@ -119,6 +122,9 @@ enum Commands {
         /// Name prefix search mode
         #[arg(long)]
         name: Option<String>,
+        /// Include scores, weight, and abstract in output
+        #[arg(long)]
+        full: bool,
     },
 
     /// Pure vector similarity search
@@ -149,6 +155,9 @@ enum Commands {
         top_k: usize,
         #[arg(long, default_value_t = 1)]
         depth: usize,
+        /// Include scores, weight, and abstract in output
+        #[arg(long)]
+        full: bool,
     },
 
     /// Show neighbors of a node via graph traversal

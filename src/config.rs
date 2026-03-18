@@ -204,15 +204,89 @@ impl Default for DaemonConfig {
     }
 }
 
-/// Resolve the memcore root directory
+/// Resolve the memcore root directory. No implicit fallbacks — explicit only.
+///
+/// Priority:
+///   1. `MEMCORE_DIR` env var (generic override, always wins)
+///   2. `<DIRNAME>_DIR` env var (derived from binary's parent directory name)
+///      e.g. binary in `work_memcore/` → checks `WORK_MEMCORE_DIR`
+///   3. Binary's own parent directory (if it contains memcore.toml or memories/)
+///
+/// If none resolves, prints an error and exits. No silent fallback to
+/// `~/.memcore/` or hidden `.memcore/` directories.
 pub fn memcore_dir() -> PathBuf {
-    std::env::var("MEMCORE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            dirs::home_dir()
-                .expect("cannot determine home directory")
-                .join(".memcore")
-        })
+    match try_memcore_dir() {
+        Some(dir) => dir,
+        None => {
+            let hint = exe_parent_dir_name()
+                .map(|name| {
+                    let env_name = dir_name_to_env_var(&name);
+                    format!(
+                        "Set {env_name} or MEMCORE_DIR to the path of your memcore directory, \
+                         or run the binary from within it.\n\
+                         Example: export {env_name}=\"/path/to/{name}\""
+                    )
+                })
+                .unwrap_or_else(|| {
+                    "Set MEMCORE_DIR to the path of your memcore directory, \
+                     or run the binary from within it.\n\
+                     Example: export MEMCORE_DIR=\"/path/to/your/memcore\""
+                        .to_string()
+                });
+            eprintln!("error: cannot find memcore directory.\n{hint}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Try to resolve the memcore root directory, returning None if not found.
+pub fn try_memcore_dir() -> Option<PathBuf> {
+    // 1. MEMCORE_DIR env var (generic override)
+    if let Ok(dir) = std::env::var("MEMCORE_DIR") {
+        return Some(PathBuf::from(dir));
+    }
+
+    // 2. <DIRNAME>_DIR env var (derived from binary's parent directory name)
+    //    e.g. binary at /home/user/work_memcore/memcore → WORK_MEMCORE_DIR
+    if let Some(name) = exe_parent_dir_name() {
+        let env_name = dir_name_to_env_var(&name);
+        if let Ok(dir) = std::env::var(&env_name) {
+            return Some(PathBuf::from(dir));
+        }
+    }
+
+    // 3. Binary's own parent directory (self-contained release layout)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Ok(canonical) = exe.canonicalize() {
+            if let Some(parent) = canonical.parent() {
+                if parent.join("memcore.toml").exists() || parent.join("memories").is_dir() {
+                    return Some(parent.to_path_buf());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Get the binary's parent directory name (e.g. "work_memcore").
+fn exe_parent_dir_name() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let canonical = exe.canonicalize().ok()?;
+    let parent = canonical.parent()?;
+    parent.file_name()?.to_str().map(|s| s.to_string())
+}
+
+/// Convert a directory name to an env var name.
+/// "work_memcore" → "WORK_MEMCORE_DIR"
+/// "my-project-memcore" → "MY_PROJECT_MEMCORE_DIR"
+/// "memcore" → "MEMCORE_DIR"
+pub fn dir_name_to_env_var(name: &str) -> String {
+    let upper: String = name
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c.to_ascii_uppercase() } else { '_' })
+        .collect();
+    format!("{}_DIR", upper)
 }
 
 /// Load config from memcore.toml, falling back to defaults

@@ -180,7 +180,7 @@ fn test_delete_removes_file_from_disk() {
     assert!(file_exists(dir.path(), "doomed"));
 
     let req = Request::Delete {
-        name: "doomed".into(),
+        names: vec!["doomed".into()],
     };
     let resp = handle_request(&mut state, &req, dir.path());
     assert!(resp.success);
@@ -207,7 +207,7 @@ fn test_delete_removes_back_links_from_peer_files() {
 
     // Delete node-a
     let del_req = Request::Delete {
-        name: "node-a".into(),
+        names: vec!["node-a".into()],
     };
     handle_request(&mut state, &del_req, dir.path());
 
@@ -227,7 +227,7 @@ fn test_delete_survives_daemon_restart() {
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
     let req = Request::Delete {
-        name: "ephemeral".into(),
+        names: vec!["ephemeral".into()],
     };
     handle_request(&mut state, &req, dir.path());
     drop(state);
@@ -257,7 +257,7 @@ fn test_delete_with_multiple_peers_cleans_all_files() {
 
     // Delete hub
     let req = Request::Delete {
-        name: "hub".into(),
+        names: vec!["hub".into()],
     };
     handle_request(&mut state, &req, dir.path());
 
@@ -1158,7 +1158,7 @@ fn test_full_lifecycle_create_link_update_delete_restart() {
     handle_request(
         &mut state,
         &Request::Delete {
-            name: "node-c".into(),
+            names: vec!["node-c".into()],
         },
         dir.path(),
     );
@@ -1334,7 +1334,7 @@ fn test_graph_idx_updated_after_delete() {
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
     let req = Request::Delete {
-        name: "da".into(),
+        names: vec!["da".into()],
     };
     handle_request(&mut state, &req, dir.path());
 
@@ -1459,7 +1459,7 @@ fn test_delete_last_node_leaves_empty_system() {
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
     let req = Request::Delete {
-        name: "only-node".into(),
+        names: vec!["only-node".into()],
     };
     handle_request(&mut state, &req, dir.path());
 

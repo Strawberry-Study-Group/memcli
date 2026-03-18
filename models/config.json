@@ -1,5 +1,5 @@
 {
-  "name": "multilingual-e5-small",
-  "dimensions": 384,
+  "name": "multilingual-e5-base",
+  "dimensions": 768,
   "max_tokens": 512
 }

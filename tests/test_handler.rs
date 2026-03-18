@@ -199,7 +199,7 @@ fn test_delete_basic() {
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
     let req = Request::Delete {
-        name: "doomed".into(),
+        names: vec!["doomed".into()],
     };
     let resp = handle_request(&mut state, &req, dir.path());
     assert!(resp.success);
@@ -215,7 +215,7 @@ fn test_delete_removes_edges() {
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
     let req = Request::Delete {
-        name: "node-a".into(),
+        names: vec!["node-a".into()],
     };
     let resp = handle_request(&mut state, &req, dir.path());
     assert!(resp.success);
@@ -231,7 +231,7 @@ fn test_delete_not_found() {
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
     let req = Request::Delete {
-        name: "ghost".into(),
+        names: vec!["ghost".into()],
     };
     let resp = handle_request(&mut state, &req, dir.path());
     assert!(!resp.success);
@@ -1742,6 +1742,7 @@ fn test_recall_name_prefix() {
         name_prefix: Some("project".into()),
         top_k: 10,
         depth: 0,
+        full: false,
     };
     let resp = handle_request(&mut state, &req, dir.path());
     assert!(resp.success);
@@ -1967,7 +1968,7 @@ fn test_delete_with_multiple_edges() {
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
     let req = Request::Delete {
-        name: "hub".into(),
+        names: vec!["hub".into()],
     };
     let resp = handle_request(&mut state, &req, dir.path());
     assert!(resp.success);
@@ -2047,6 +2048,7 @@ fn test_recall_empty_system() {
         name_prefix: None,
         top_k: 10,
         depth: 0,
+        full: false,
     };
     let resp = handle_request(&mut state, &req, dir.path());
     assert!(resp.success);
@@ -2579,6 +2581,7 @@ fn test_recall_working_memory_returns_node_names() {
         name_prefix: None,
         top_k: 10,
         depth: 0,
+        full: false,
     };
     let resp = handle_request(&mut state, &req, dir.path());
     assert!(resp.success);
@@ -2606,6 +2609,7 @@ fn test_recall_working_memory_no_duplicates() {
         name_prefix: None,
         top_k: 10,
         depth: 0,
+        full: false,
     };
     let resp = handle_request(&mut state, &req, dir.path());
     assert!(resp.success);
@@ -2678,6 +2682,7 @@ fn test_recall_no_embedding_shows_rebuild_hint() {
         name_prefix: None,
         top_k: 5,
         depth: 1,
+        full: false,
     };
     let resp = handle_request(&mut state, &req, dir.path());
     if !resp.success {

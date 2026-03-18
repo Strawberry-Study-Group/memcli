@@ -34,7 +34,7 @@ Regex: `^[a-zA-Z][a-zA-Z0-9 \-]{0,126}[a-zA-Z0-9]$`
 
 ## Node file format
 
-Every node is a YAML-frontmatter + Markdown body file stored in `~/.memcore/memories/<name>.md`:
+Every node is a YAML-frontmatter + Markdown body file stored in `memories/<name>.md` inside your memcore directory:
 
 ```yaml
 ---
@@ -94,7 +94,7 @@ memcore init [--dir <path>]
 
 | Arg | Type | Default | Description |
 |-----|------|---------|-------------|
-| `--dir` | String | `~/.memcore/` | Custom base directory |
+| `--dir` | String | (required) | Base directory for memcore data |
 
 Creates: `memories/`, `index/`, `models/`, and `memcore.toml` (if not present).
 
@@ -102,7 +102,7 @@ Client-side only, does not contact daemon. Idempotent.
 
 **Output:**
 ```
-initialized memcore at /home/user/.memcore
+initialized memcore at /home/user/work_memcore
 ```
 
 ---
@@ -800,7 +800,7 @@ Requires `--features embedding` and >= 2 indexed nodes. Computes pairwise cosine
 **Output:**
 ```
 baseline: 861 pairs | mean=0.4232 min=0.0012 p25=0.3456 p50=0.5123 p75=0.7234 p95=0.8901 max=0.9876
-saved to /home/user/.memcore/index/mem-base-info.json
+saved to index/mem-base-info.json
 ```
 
 Useful for calibrating the `--threshold` parameter in `inspect`.
@@ -848,9 +848,9 @@ stopping daemon
 
 ## Configuration
 
-Default config file: `~/.memcore/memcore.toml`
+Config file: `memcore.toml` inside your memcore directory.
 
-Override base directory via `MEMCORE_DIR` environment variable.
+Set base directory via env var derived from the directory name (e.g. `WORK_MEMCORE_DIR` for `work_memcore/`). `MEMCORE_DIR` works as a generic override. See `setup.md` for the naming convention.
 
 ```toml
 [weight]
@@ -901,7 +901,7 @@ Default: `intfloat/multilingual-e5-small` (int8 ONNX quantized)
 | Languages | 100+ |
 | ONNX size | ~118MB |
 
-Model files in `~/.memcore/models/`:
+Model files in `models/`:
 - `model_quantized.onnx` — ONNX model
 - `tokenizer.json` — tokenizer
 - `config.json` — model metadata (`name`, `dimensions`, `max_tokens`)
@@ -924,7 +924,7 @@ Max response size: 10MB.
 ## File layout
 
 ```
-~/.memcore/
+<memcore_dir>/
   memories/          .md files (truth source, flat, no subdirectories)
   index/             vectors.map, vectors.dat
   graph.idx          binary edge cache (rebuildable)
