@@ -7,7 +7,7 @@ MemCore is a local CLI + daemon that gives AI agents persistent, searchable, gra
 
 ## Get started in 60 seconds
 
-[**Download the release**](https://github.com/Strawberry-Study-Group/memcli/releases/tag/v0.0.1/), unzip it, place in your project folder.
+[**Download the latest release**](https://github.com/Strawberry-Study-Group/memcli/releases/latest), unzip it, place in your project folder.
 
 Then just tell your AI agent:
 
@@ -63,7 +63,7 @@ Vector search finds seeds. BFS traversal through the knowledge graph pulls in re
 ## Roadmap
 
 - [ ] Build and test on macOS and Windows
-- [ ] Test and build for [OpenClaw](https://github.com/OpenClaw)
+- [x] [OpenClaw plugin](openclaw-plugin/) — replaces built-in memory with MemCore's knowledge graph
 - [ ] Memory forgetting skills— decay and intelligent pruning 
 - [ ] Benchmarking suite and recall quality improvements
 - [ ] Test Multi-agent support — shared memory cores across concurrent agents
@@ -89,6 +89,10 @@ Only `skill.md` goes in the hook. It's kept lean so it doesn't waste tokens. Set
 ### Claude Code
 
 After running setup, hooks auto-inject `skill.md` + recent memories on every session start and context compaction. See `setup.md` for the exact hook config.
+
+### OpenClaw
+
+MemCore has an [OpenClaw plugin](openclaw-plugin/) that **replaces OpenClaw's built-in memory** with MemCore's knowledge graph. Install the plugin, set `plugins.slots.memory = "memory-memcore"` in your OpenClaw config, and you get graph-linked recall, feedback weighting, and health inspection instead of flat file search. See [`openclaw-plugin/README.md`](openclaw-plugin/README.md) for full setup.
 
 ### Any other agent
 

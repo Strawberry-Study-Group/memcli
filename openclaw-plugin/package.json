@@ -1,0 +1,28 @@
+{
+  "name": "@memcore/memory-memcore",
+  "version": "0.0.2",
+  "private": false,
+  "description": "OpenClaw memory plugin backed by MemCore — persistent knowledge graph with semantic search",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "memory",
+    "ai-agent",
+    "semantic-search",
+    "knowledge-graph"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Strawberry-Study-Group/memcli.git",
+    "directory": "openclaw-plugin"
+  },
+  "openclaw": {
+    "extensions": ["./index.ts"]
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0",
+    "typescript": "^5.7.0"
+  }
+}

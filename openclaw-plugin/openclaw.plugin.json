@@ -1,0 +1,43 @@
+{
+  "id": "memory-memcore",
+  "kind": "memory",
+  "name": "MemCore Memory",
+  "description": "Persistent knowledge graph memory with semantic search, powered by MemCore",
+  "version": "0.0.2",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "binaryPath": {
+        "type": "string",
+        "description": "Absolute path to the memcore binary. If omitted, looks for 'memcore' on PATH."
+      },
+      "memcoreDir": {
+        "type": "string",
+        "description": "Absolute path to the memcore data directory. If omitted, uses binary's parent directory."
+      },
+      "timeoutMs": {
+        "type": "number",
+        "description": "Timeout in milliseconds for memcore commands (default: 10000)",
+        "default": 10000
+      }
+    },
+    "required": []
+  },
+  "uiHints": {
+    "binaryPath": {
+      "label": "Binary Path",
+      "placeholder": "/home/user/memcore/memcore",
+      "help": "Path to the memcore binary. Leave empty if memcore is on your PATH."
+    },
+    "memcoreDir": {
+      "label": "Data Directory",
+      "placeholder": "/home/user/memcore",
+      "help": "Path to the memcore data directory (contains memories/, models/, etc.)"
+    },
+    "timeoutMs": {
+      "label": "Command Timeout (ms)",
+      "advanced": true
+    }
+  }
+}

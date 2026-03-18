@@ -1,0 +1,49 @@
+name: Release OpenClaw Plugin
+
+on:
+  push:
+    tags:
+      - 'openclaw-v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Sync version from tag
+        working-directory: openclaw-plugin
+        run: |
+          TAG="${GITHUB_REF#refs/tags/openclaw-}"
+          npm version "$TAG" --no-git-tag-version
+
+      - name: Install dependencies
+        working-directory: openclaw-plugin
+        run: npm install
+
+      - name: Run tests
+        working-directory: openclaw-plugin
+        run: npx vitest run
+
+      - name: Publish to npm
+        working-directory: openclaw-plugin
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "OpenClaw Plugin ${{ github.ref_name }}"
+          body: |
+            OpenClaw memory plugin release.
+
+            Install: `openclaw plugins install @memcore/memory-memcore`
+
+            See [openclaw-plugin/README.md](openclaw-plugin/README.md) for setup instructions.
