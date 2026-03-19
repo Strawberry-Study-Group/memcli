@@ -26,7 +26,7 @@ fn test_with_dimensions() {
 #[test]
 fn test_insert_single() {
     let mut idx = VectorIndex::new();
-    let id = idx.insert("node-a", &[1.0, 0.0, 0.0]);
+    let id = idx.insert("node-a", &[1.0, 0.0, 0.0]).unwrap();
     assert_eq!(id, 0);
     assert_eq!(idx.node_count(), 1);
     assert!(idx.contains("node-a"));
@@ -36,9 +36,9 @@ fn test_insert_single() {
 #[test]
 fn test_insert_multiple() {
     let mut idx = VectorIndex::new();
-    let id0 = idx.insert("node-a", &[1.0, 0.0, 0.0]);
-    let id1 = idx.insert("node-b", &[0.0, 1.0, 0.0]);
-    let id2 = idx.insert("node-c", &[0.0, 0.0, 1.0]);
+    let id0 = idx.insert("node-a", &[1.0, 0.0, 0.0]).unwrap();
+    let id1 = idx.insert("node-b", &[0.0, 1.0, 0.0]).unwrap();
+    let id2 = idx.insert("node-c", &[0.0, 0.0, 1.0]).unwrap();
     assert_eq!(id0, 0);
     assert_eq!(id1, 1);
     assert_eq!(id2, 2);
@@ -48,23 +48,23 @@ fn test_insert_multiple() {
 #[test]
 fn test_insert_sets_dimensions() {
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0, 2.0, 3.0, 4.0]);
+    idx.insert("node-a", &[1.0, 2.0, 3.0, 4.0]).unwrap();
     assert_eq!(idx.dimensions(), Some(4));
 }
 
 #[test]
-#[should_panic(expected = "dimension mismatch")]
-fn test_insert_dimension_mismatch_panics() {
+fn test_insert_dimension_mismatch_returns_error() {
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0, 0.0, 0.0]);
-    idx.insert("node-b", &[1.0, 0.0]); // wrong dimensions
+    idx.insert("node-a", &[1.0, 0.0, 0.0]).unwrap();
+    let result = idx.insert("node-b", &[1.0, 0.0]); // wrong dimensions
+    assert!(result.is_err(), "dimension mismatch should return Err");
 }
 
 #[test]
 fn test_insert_overwrites_existing() {
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0, 0.0, 0.0]);
-    let id = idx.insert("node-a", &[0.0, 1.0, 0.0]); // overwrite
+    idx.insert("node-a", &[1.0, 0.0, 0.0]).unwrap();
+    let id = idx.insert("node-a", &[0.0, 1.0, 0.0]).unwrap(); // overwrite
     assert_eq!(idx.node_count(), 1);
     // embedding should be updated
     let emb = idx.get_embedding("node-a").unwrap();
@@ -80,7 +80,7 @@ fn test_insert_overwrites_existing() {
 #[test]
 fn test_remove_existing() {
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0, 0.0, 0.0]);
+    idx.insert("node-a", &[1.0, 0.0, 0.0]).unwrap();
     assert!(idx.remove("node-a"));
     assert_eq!(idx.node_count(), 0);
     assert!(!idx.contains("node-a"));
@@ -95,8 +95,8 @@ fn test_remove_nonexistent() {
 #[test]
 fn test_remove_does_not_affect_others() {
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0, 0.0]);
-    idx.insert("node-b", &[0.0, 1.0]);
+    idx.insert("node-a", &[1.0, 0.0]).unwrap();
+    idx.insert("node-b", &[0.0, 1.0]).unwrap();
     idx.remove("node-a");
     assert_eq!(idx.node_count(), 1);
     assert!(idx.contains("node-b"));
@@ -117,7 +117,7 @@ fn test_search_empty_index() {
 #[test]
 fn test_search_single_node() {
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0, 0.0, 0.0]);
+    idx.insert("node-a", &[1.0, 0.0, 0.0]).unwrap();
     let results = idx.search(&[1.0, 0.0, 0.0], 5);
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].node_name, "node-a");
@@ -127,9 +127,9 @@ fn test_search_single_node() {
 #[test]
 fn test_search_returns_sorted_by_similarity() {
     let mut idx = VectorIndex::new();
-    idx.insert("exact-match", &[1.0, 0.0, 0.0]);
-    idx.insert("partial-match", &[0.7, 0.7, 0.0]);
-    idx.insert("no-match", &[0.0, 0.0, 1.0]);
+    idx.insert("exact-match", &[1.0, 0.0, 0.0]).unwrap();
+    idx.insert("partial-match", &[0.7, 0.7, 0.0]).unwrap();
+    idx.insert("no-match", &[0.0, 0.0, 1.0]).unwrap();
 
     let results = idx.search(&[1.0, 0.0, 0.0], 3);
     assert_eq!(results.len(), 3);
@@ -141,10 +141,10 @@ fn test_search_returns_sorted_by_similarity() {
 #[test]
 fn test_search_top_k_limits_results() {
     let mut idx = VectorIndex::new();
-    idx.insert("a", &[1.0, 0.0]);
-    idx.insert("b", &[0.9, 0.1]);
-    idx.insert("c", &[0.8, 0.2]);
-    idx.insert("d", &[0.0, 1.0]);
+    idx.insert("a", &[1.0, 0.0]).unwrap();
+    idx.insert("b", &[0.9, 0.1]).unwrap();
+    idx.insert("c", &[0.8, 0.2]).unwrap();
+    idx.insert("d", &[0.0, 1.0]).unwrap();
 
     let results = idx.search(&[1.0, 0.0], 2);
     assert_eq!(results.len(), 2);
@@ -153,8 +153,8 @@ fn test_search_top_k_limits_results() {
 #[test]
 fn test_search_top_k_larger_than_index() {
     let mut idx = VectorIndex::new();
-    idx.insert("a", &[1.0, 0.0]);
-    idx.insert("b", &[0.0, 1.0]);
+    idx.insert("a", &[1.0, 0.0]).unwrap();
+    idx.insert("b", &[0.0, 1.0]).unwrap();
 
     let results = idx.search(&[1.0, 0.0], 10);
     assert_eq!(results.len(), 2);
@@ -163,8 +163,8 @@ fn test_search_top_k_larger_than_index() {
 #[test]
 fn test_search_orthogonal_vectors() {
     let mut idx = VectorIndex::new();
-    idx.insert("x-axis", &[1.0, 0.0]);
-    idx.insert("y-axis", &[0.0, 1.0]);
+    idx.insert("x-axis", &[1.0, 0.0]).unwrap();
+    idx.insert("y-axis", &[0.0, 1.0]).unwrap();
 
     let results = idx.search(&[1.0, 0.0], 2);
     assert_eq!(results[0].node_name, "x-axis");
@@ -175,8 +175,8 @@ fn test_search_orthogonal_vectors() {
 #[test]
 fn test_search_negative_similarity() {
     let mut idx = VectorIndex::new();
-    idx.insert("same-dir", &[1.0, 0.0]);
-    idx.insert("opposite", &[-1.0, 0.0]);
+    idx.insert("same-dir", &[1.0, 0.0]).unwrap();
+    idx.insert("opposite", &[-1.0, 0.0]).unwrap();
 
     let results = idx.search(&[1.0, 0.0], 2);
     assert_eq!(results[0].node_name, "same-dir");
@@ -187,8 +187,8 @@ fn test_search_negative_similarity() {
 #[test]
 fn test_search_after_remove() {
     let mut idx = VectorIndex::new();
-    idx.insert("keep", &[1.0, 0.0]);
-    idx.insert("gone", &[0.9, 0.1]);
+    idx.insert("keep", &[1.0, 0.0]).unwrap();
+    idx.insert("gone", &[0.9, 0.1]).unwrap();
     idx.remove("gone");
 
     let results = idx.search(&[1.0, 0.0], 5);
@@ -199,7 +199,7 @@ fn test_search_after_remove() {
 #[test]
 fn test_search_top_k_zero() {
     let mut idx = VectorIndex::new();
-    idx.insert("a", &[1.0, 0.0]);
+    idx.insert("a", &[1.0, 0.0]).unwrap();
     let results = idx.search(&[1.0, 0.0], 0);
     assert!(results.is_empty());
 }
@@ -211,7 +211,7 @@ fn test_search_top_k_zero() {
 #[test]
 fn test_get_embedding_exists() {
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0, 2.0, 3.0]);
+    idx.insert("node-a", &[1.0, 2.0, 3.0]).unwrap();
     let emb = idx.get_embedding("node-a").unwrap();
     assert_eq!(emb, &[1.0, 2.0, 3.0]);
 }
@@ -225,7 +225,7 @@ fn test_get_embedding_not_found() {
 #[test]
 fn test_get_embedding_after_remove() {
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0, 2.0, 3.0]);
+    idx.insert("node-a", &[1.0, 2.0, 3.0]).unwrap();
     idx.remove("node-a");
     assert!(idx.get_embedding("node-a").is_none());
 }
@@ -237,7 +237,7 @@ fn test_get_embedding_after_remove() {
 #[test]
 fn test_contains_present() {
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0]);
+    idx.insert("node-a", &[1.0]).unwrap();
     assert!(idx.contains("node-a"));
 }
 
@@ -254,7 +254,7 @@ fn test_contains_absent() {
 #[test]
 fn test_rename_existing() {
     let mut idx = VectorIndex::new();
-    idx.insert("old-name", &[1.0, 2.0]);
+    idx.insert("old-name", &[1.0, 2.0]).unwrap();
     assert!(idx.rename("old-name", "new-name"));
     assert!(!idx.contains("old-name"));
     assert!(idx.contains("new-name"));
@@ -271,7 +271,7 @@ fn test_rename_nonexistent() {
 #[test]
 fn test_rename_searchable_under_new_name() {
     let mut idx = VectorIndex::new();
-    idx.insert("old-name", &[1.0, 0.0]);
+    idx.insert("old-name", &[1.0, 0.0]).unwrap();
     idx.rename("old-name", "new-name");
     let results = idx.search(&[1.0, 0.0], 1);
     assert_eq!(results[0].node_name, "new-name");
@@ -290,9 +290,9 @@ fn test_all_node_names_empty() {
 #[test]
 fn test_all_node_names() {
     let mut idx = VectorIndex::new();
-    idx.insert("alpha", &[1.0]);
-    idx.insert("beta", &[2.0]);
-    idx.insert("gamma", &[3.0]);
+    idx.insert("alpha", &[1.0]).unwrap();
+    idx.insert("beta", &[2.0]).unwrap();
+    idx.insert("gamma", &[3.0]).unwrap();
     let mut names = idx.all_node_names();
     names.sort();
     assert_eq!(names, vec!["alpha", "beta", "gamma"]);
@@ -309,9 +309,9 @@ fn test_save_load_roundtrip() {
     std::fs::create_dir_all(&index_dir).unwrap();
 
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0, 0.0, 0.5]);
-    idx.insert("node-b", &[0.0, 1.0, 0.3]);
-    idx.insert("node-c", &[0.2, 0.8, 1.0]);
+    idx.insert("node-a", &[1.0, 0.0, 0.5]).unwrap();
+    idx.insert("node-b", &[0.0, 1.0, 0.3]).unwrap();
+    idx.insert("node-c", &[0.2, 0.8, 1.0]).unwrap();
 
     idx.save_to_dir(&index_dir).unwrap();
 
@@ -354,8 +354,8 @@ fn test_save_load_preserves_search_results() {
     std::fs::create_dir_all(&index_dir).unwrap();
 
     let mut idx = VectorIndex::new();
-    idx.insert("close", &[0.9, 0.1]);
-    idx.insert("far", &[0.0, 1.0]);
+    idx.insert("close", &[0.9, 0.1]).unwrap();
+    idx.insert("far", &[0.0, 1.0]).unwrap();
     idx.save_to_dir(&index_dir).unwrap();
 
     let loaded = VectorIndex::load_from_dir(&index_dir).unwrap();
@@ -371,8 +371,8 @@ fn test_save_load_after_remove() {
     std::fs::create_dir_all(&index_dir).unwrap();
 
     let mut idx = VectorIndex::new();
-    idx.insert("keep", &[1.0, 0.0]);
-    idx.insert("gone", &[0.0, 1.0]);
+    idx.insert("keep", &[1.0, 0.0]).unwrap();
+    idx.insert("gone", &[0.0, 1.0]).unwrap();
     idx.remove("gone");
     idx.save_to_dir(&index_dir).unwrap();
 
@@ -393,8 +393,8 @@ fn test_high_dimensional_vectors() {
     let v1: Vec<f32> = (0..dim).map(|i| (i as f32) / dim as f32).collect();
     let v2: Vec<f32> = (0..dim).map(|i| 1.0 - (i as f32) / dim as f32).collect();
 
-    idx.insert("node-a", &v1);
-    idx.insert("node-b", &v2);
+    idx.insert("node-a", &v1).unwrap();
+    idx.insert("node-b", &v2).unwrap();
 
     let results = idx.search(&v1, 2);
     assert_eq!(results.len(), 2);
@@ -429,9 +429,9 @@ fn test_many_nodes_search() {
 #[test]
 fn test_search_identical_vectors() {
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[0.5, 0.5, 0.5]);
-    idx.insert("node-b", &[0.5, 0.5, 0.5]);
-    idx.insert("node-c", &[0.5, 0.5, 0.5]);
+    idx.insert("node-a", &[0.5, 0.5, 0.5]).unwrap();
+    idx.insert("node-b", &[0.5, 0.5, 0.5]).unwrap();
+    idx.insert("node-c", &[0.5, 0.5, 0.5]).unwrap();
 
     let results = idx.search(&[0.5, 0.5, 0.5], 3);
     assert_eq!(results.len(), 3);
@@ -448,7 +448,7 @@ fn test_search_identical_vectors() {
 #[test]
 fn test_insert_zero_vector() {
     let mut idx = VectorIndex::new();
-    idx.insert("zero-node", &[0.0, 0.0, 0.0]);
+    idx.insert("zero-node", &[0.0, 0.0, 0.0]).unwrap();
     assert_eq!(idx.node_count(), 1);
     assert!(idx.contains("zero-node"));
 

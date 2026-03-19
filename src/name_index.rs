@@ -10,7 +10,7 @@ impl NameIndex {
     }
 
     /// Build from an unsorted iterator of names
-    pub fn from_iter(iter: impl IntoIterator<Item = String>) -> Self {
+    pub fn build(iter: impl IntoIterator<Item = String>) -> Self {
         let mut names: Vec<String> = iter.into_iter().collect();
         names.sort();
         Self { names }

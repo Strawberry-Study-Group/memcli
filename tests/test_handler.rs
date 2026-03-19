@@ -581,9 +581,9 @@ fn test_inspect_global_similar_pairs_found() {
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
     // a and b near-identical, c orthogonal
-    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]);
-    state.vector_index.insert("node-b", &[0.99, 0.01, 0.0]);
-    state.vector_index.insert("node-c", &[0.0, 0.0, 1.0]);
+    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]).unwrap();
+    state.vector_index.insert("node-b", &[0.99, 0.01, 0.0]).unwrap();
+    state.vector_index.insert("node-c", &[0.0, 0.0, 1.0]).unwrap();
 
     let req = Request::Inspect {
         node: None,
@@ -612,8 +612,8 @@ fn test_inspect_global_threshold_filters() {
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
     // moderate similarity: cos([1,0,0], [0.8,0.6,0]) = 0.8
-    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]);
-    state.vector_index.insert("node-b", &[0.8, 0.6, 0.0]);
+    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]).unwrap();
+    state.vector_index.insert("node-b", &[0.8, 0.6, 0.0]).unwrap();
 
     // With threshold=0.9, the pair (sim≈0.8) should be filtered out
     let req = Request::Inspect {
@@ -666,10 +666,10 @@ fn test_inspect_global_pairs_sorted_descending() {
     add_node(dir.path(), "node-d", vec![], "d");
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
-    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]);
-    state.vector_index.insert("node-b", &[0.99, 0.01, 0.0]); // very similar to a
-    state.vector_index.insert("node-c", &[0.95, 0.05, 0.0]); // less similar to a
-    state.vector_index.insert("node-d", &[0.98, 0.02, 0.0]); // moderately similar to a
+    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]).unwrap();
+    state.vector_index.insert("node-b", &[0.99, 0.01, 0.0]).unwrap(); // very similar to a
+    state.vector_index.insert("node-c", &[0.95, 0.05, 0.0]).unwrap(); // less similar to a
+    state.vector_index.insert("node-d", &[0.98, 0.02, 0.0]).unwrap(); // moderately similar to a
 
     let req = Request::Inspect {
         node: None,
@@ -696,7 +696,7 @@ fn test_inspect_global_no_self_pairs() {
     add_node(dir.path(), "node-a", vec![], "a");
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
-    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]);
+    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]).unwrap();
 
     let req = Request::Inspect {
         node: None,
@@ -727,10 +727,10 @@ fn test_inspect_global_redundancy_metric() {
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
     // Only a and b are similar; c and d are orthogonal
-    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]);
-    state.vector_index.insert("node-b", &[0.99, 0.01, 0.0]);
-    state.vector_index.insert("node-c", &[0.0, 1.0, 0.0]);
-    state.vector_index.insert("node-d", &[0.0, 0.0, 1.0]);
+    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]).unwrap();
+    state.vector_index.insert("node-b", &[0.99, 0.01, 0.0]).unwrap();
+    state.vector_index.insert("node-c", &[0.0, 1.0, 0.0]).unwrap();
+    state.vector_index.insert("node-d", &[0.0, 0.0, 1.0]).unwrap();
 
     let req = Request::Inspect {
         node: None,
@@ -760,9 +760,9 @@ fn test_inspect_global_all_below_threshold() {
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
     // All orthogonal — cosine similarity 0.0
-    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]);
-    state.vector_index.insert("node-b", &[0.0, 1.0, 0.0]);
-    state.vector_index.insert("node-c", &[0.0, 0.0, 1.0]);
+    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]).unwrap();
+    state.vector_index.insert("node-b", &[0.0, 1.0, 0.0]).unwrap();
+    state.vector_index.insert("node-c", &[0.0, 0.0, 1.0]).unwrap();
 
     let req = Request::Inspect {
         node: None,
@@ -790,9 +790,9 @@ fn test_inspect_global_default_threshold() {
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
     // a-b similarity ~0.9998 (above 0.85 default), a-c similarity ~0.71 (below 0.85)
-    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]);
-    state.vector_index.insert("node-b", &[0.99, 0.01, 0.0]);
-    state.vector_index.insert("node-c", &[0.7, 0.7, 0.0]); // cosine with [1,0,0] ≈ 0.707
+    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]).unwrap();
+    state.vector_index.insert("node-b", &[0.99, 0.01, 0.0]).unwrap();
+    state.vector_index.insert("node-c", &[0.7, 0.7, 0.0]).unwrap(); // cosine with [1,0,0] ≈ 0.707
 
     // threshold=None → uses default 0.85
     let req = Request::Inspect {
@@ -821,8 +821,8 @@ fn test_inspect_global_pairs_json() {
     add_node(dir.path(), "node-b", vec![], "b");
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
-    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]);
-    state.vector_index.insert("node-b", &[0.99, 0.01, 0.0]);
+    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]).unwrap();
+    state.vector_index.insert("node-b", &[0.99, 0.01, 0.0]).unwrap();
 
     let req = Request::Inspect {
         node: None,
@@ -869,7 +869,7 @@ fn test_inspect_global_pairs_cap_at_200() {
         let name = format!("n-{:03}", i);
         let mut emb = vec![1.0, 0.0, 0.0];
         emb[1] = i as f32 * 0.001; // tiny variation
-        state.vector_index.insert(&name, &emb);
+        state.vector_index.insert(&name, &emb).unwrap();
     }
 
     let req = Request::Inspect {
@@ -912,7 +912,7 @@ fn test_inspect_global_pairs_default_cap_50() {
         let name = format!("n-{:03}", i);
         let mut emb = vec![1.0, 0.0, 0.0];
         emb[1] = i as f32 * 0.001;
-        state.vector_index.insert(&name, &emb);
+        state.vector_index.insert(&name, &emb).unwrap();
     }
 
     let req = Request::Inspect {
@@ -938,7 +938,7 @@ fn test_inspect_global_single_node_no_pairs() {
     add_node(dir.path(), "solo", vec![], "alone");
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
-    state.vector_index.insert("solo", &[1.0, 0.0, 0.0]);
+    state.vector_index.insert("solo", &[1.0, 0.0, 0.0]).unwrap();
 
     let req = Request::Inspect {
         node: None,
@@ -965,8 +965,8 @@ fn test_inspect_global_identical_embeddings_sim_one() {
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
     let emb = vec![0.6, 0.8, 0.0];
-    state.vector_index.insert("node-a", &emb);
-    state.vector_index.insert("node-b", &emb);
+    state.vector_index.insert("node-a", &emb).unwrap();
+    state.vector_index.insert("node-b", &emb).unwrap();
 
     let req = Request::Inspect {
         node: None,
@@ -992,8 +992,8 @@ fn test_inspect_global_zero_vector_produces_zero_sim() {
     add_node(dir.path(), "node-b", vec![], "b");
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
-    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]);
-    state.vector_index.insert("node-b", &[0.0, 0.0, 0.0]); // zero vector
+    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]).unwrap();
+    state.vector_index.insert("node-b", &[0.0, 0.0, 0.0]).unwrap(); // zero vector
 
     let req = Request::Inspect {
         node: None,
@@ -1021,8 +1021,8 @@ fn test_inspect_global_partial_embeddings_skip_unindexed() {
     add_node(dir.path(), "no-embedding", vec![], "c");
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
-    state.vector_index.insert("indexed-a", &[1.0, 0.0, 0.0]);
-    state.vector_index.insert("indexed-b", &[0.99, 0.01, 0.0]);
+    state.vector_index.insert("indexed-a", &[1.0, 0.0, 0.0]).unwrap();
+    state.vector_index.insert("indexed-b", &[0.99, 0.01, 0.0]).unwrap();
     // no-embedding has no vector
 
     let req = Request::Inspect {
@@ -1057,8 +1057,8 @@ fn test_inspect_global_threshold_boundary_inclusive() {
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
     // Unit vectors: cos([1,0,0], [0.6,0.8,0]) = 0.6
-    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]);
-    state.vector_index.insert("node-b", &[0.6, 0.8, 0.0]);
+    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]).unwrap();
+    state.vector_index.insert("node-b", &[0.6, 0.8, 0.0]).unwrap();
 
     let sim = memcore::util::cosine_similarity(&[1.0, 0.0, 0.0], &[0.6, 0.8, 0.0]);
 
@@ -1102,8 +1102,8 @@ fn test_inspect_global_negative_similarity_excluded_default() {
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
     // Opposite directions → cosine = -1.0
-    state.vector_index.insert("pos", &[1.0, 0.0, 0.0]);
-    state.vector_index.insert("neg", &[-1.0, 0.0, 0.0]);
+    state.vector_index.insert("pos", &[1.0, 0.0, 0.0]).unwrap();
+    state.vector_index.insert("neg", &[-1.0, 0.0, 0.0]).unwrap();
 
     // Default threshold 0.85 → pair with -1.0 similarity excluded
     let req = Request::Inspect {
@@ -1132,9 +1132,9 @@ fn test_inspect_global_redundancy_all_similar() {
 
     // All identical → every pair has similarity 1.0
     let emb = vec![1.0, 0.0, 0.0];
-    state.vector_index.insert("node-a", &emb);
-    state.vector_index.insert("node-b", &emb);
-    state.vector_index.insert("node-c", &emb);
+    state.vector_index.insert("node-a", &emb).unwrap();
+    state.vector_index.insert("node-b", &emb).unwrap();
+    state.vector_index.insert("node-c", &emb).unwrap();
 
     let req = Request::Inspect {
         node: None,
@@ -1167,10 +1167,10 @@ fn test_inspect_global_pair_ordering_deterministic() {
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
     let emb = vec![1.0, 0.0, 0.0];
-    state.vector_index.insert("node-a", &emb);
-    state.vector_index.insert("node-b", &emb);
-    state.vector_index.insert("node-c", &emb);
-    state.vector_index.insert("node-d", &emb);
+    state.vector_index.insert("node-a", &emb).unwrap();
+    state.vector_index.insert("node-b", &emb).unwrap();
+    state.vector_index.insert("node-c", &emb).unwrap();
+    state.vector_index.insert("node-d", &emb).unwrap();
 
     let req = Request::Inspect {
         node: None,
@@ -1287,8 +1287,8 @@ fn test_inspect_node_basic() {
     // Insert fake embeddings
     let emb_a = vec![1.0, 0.0, 0.0];
     let emb_b = vec![0.9, 0.1, 0.0];
-    state.vector_index.insert("node-a", &emb_a);
-    state.vector_index.insert("node-b", &emb_b);
+    state.vector_index.insert("node-a", &emb_a).unwrap();
+    state.vector_index.insert("node-b", &emb_b).unwrap();
 
     let req = Request::Inspect {
         node: Some("node-a".into()),
@@ -1323,9 +1323,9 @@ fn test_inspect_node_with_collisions() {
     let emb_orig = vec![1.0, 0.0, 0.0];
     let emb_dup = vec![0.99, 0.01, 0.0]; // very similar
     let emb_unrelated = vec![0.0, 0.0, 1.0]; // orthogonal
-    state.vector_index.insert("original", &emb_orig);
-    state.vector_index.insert("near-dup", &emb_dup);
-    state.vector_index.insert("unrelated", &emb_unrelated);
+    state.vector_index.insert("original", &emb_orig).unwrap();
+    state.vector_index.insert("near-dup", &emb_dup).unwrap();
+    state.vector_index.insert("unrelated", &emb_unrelated).unwrap();
 
     let req = Request::Inspect {
         node: Some("original".into()),
@@ -1380,8 +1380,8 @@ fn test_inspect_node_json() {
     add_node(dir.path(), "node-b", vec![], "abstract b");
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
-    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]);
-    state.vector_index.insert("node-b", &[0.9, 0.1, 0.0]);
+    state.vector_index.insert("node-a", &[1.0, 0.0, 0.0]).unwrap();
+    state.vector_index.insert("node-b", &[0.9, 0.1, 0.0]).unwrap();
 
     let req = Request::Inspect {
         node: Some("node-a".into()),
@@ -1410,7 +1410,7 @@ fn test_inspect_node_self_excluded() {
     add_node(dir.path(), "solo", vec![], "abstract");
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
-    state.vector_index.insert("solo", &[1.0, 0.0, 0.0]);
+    state.vector_index.insert("solo", &[1.0, 0.0, 0.0]).unwrap();
 
     let req = Request::Inspect {
         node: Some("solo".into()),
@@ -1436,7 +1436,7 @@ fn test_inspect_node_zero_edges() {
     add_node(dir.path(), "lonely", vec![], "abstract");
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
-    state.vector_index.insert("lonely", &[1.0, 0.0, 0.0]);
+    state.vector_index.insert("lonely", &[1.0, 0.0, 0.0]).unwrap();
 
     let req = Request::Inspect {
         node: Some("lonely".into()),
@@ -1472,7 +1472,7 @@ fn test_inspect_node_many_edges() {
         handle_request(&mut state, &req, dir.path());
     }
 
-    state.vector_index.insert("hub", &[1.0, 0.0, 0.0]);
+    state.vector_index.insert("hub", &[1.0, 0.0, 0.0]).unwrap();
 
     let req = Request::Inspect {
         node: Some("hub".into()),
@@ -1499,7 +1499,7 @@ fn test_inspect_node_top_k_capped_at_ten() {
     }
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
-    state.vector_index.insert("target", &[1.0, 0.0, 0.0]);
+    state.vector_index.insert("target", &[1.0, 0.0, 0.0]).unwrap();
     for i in 0..15 {
         // Vary similarity slightly so ordering is deterministic
         let sim = 0.99 - (i as f32 * 0.01);
@@ -1536,8 +1536,8 @@ fn test_inspect_node_identical_embeddings() {
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
     let emb = vec![0.6, 0.8, 0.0]; // already unit-length
-    state.vector_index.insert("node-a", &emb);
-    state.vector_index.insert("node-b", &emb);
+    state.vector_index.insert("node-a", &emb).unwrap();
+    state.vector_index.insert("node-b", &emb).unwrap();
 
     let req = Request::Inspect {
         node: Some("node-a".into()),
@@ -1565,8 +1565,8 @@ fn test_inspect_node_partial_embeddings() {
     add_node(dir.path(), "not-indexed", vec![], "abstract");
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
-    state.vector_index.insert("indexed", &[1.0, 0.0, 0.0]);
-    state.vector_index.insert("also-indexed", &[0.9, 0.1, 0.0]);
+    state.vector_index.insert("indexed", &[1.0, 0.0, 0.0]).unwrap();
+    state.vector_index.insert("also-indexed", &[0.9, 0.1, 0.0]).unwrap();
     // not-indexed has no embedding
 
     let req = Request::Inspect {
@@ -1626,11 +1626,11 @@ fn test_inspect_node_descending_similarity_order() {
     add_node(dir.path(), "neg", vec![], "n");
     let mut state = load_state_from_dir(dir.path()).unwrap();
 
-    state.vector_index.insert("target", &[1.0, 0.0, 0.0]);
-    state.vector_index.insert("high", &[0.95, 0.05, 0.0]);
-    state.vector_index.insert("mid", &[0.5, 0.5, 0.0]);
-    state.vector_index.insert("low", &[0.1, 0.9, 0.0]);
-    state.vector_index.insert("neg", &[-1.0, 0.0, 0.0]); // opposite direction
+    state.vector_index.insert("target", &[1.0, 0.0, 0.0]).unwrap();
+    state.vector_index.insert("high", &[0.95, 0.05, 0.0]).unwrap();
+    state.vector_index.insert("mid", &[0.5, 0.5, 0.0]).unwrap();
+    state.vector_index.insert("low", &[0.1, 0.9, 0.0]).unwrap();
+    state.vector_index.insert("neg", &[-1.0, 0.0, 0.0]).unwrap(); // opposite direction
 
     let req = Request::Inspect {
         node: Some("target".into()),

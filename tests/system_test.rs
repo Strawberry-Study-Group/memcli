@@ -902,3 +902,202 @@ fn test_inspect_json_format_system() {
     let data = parsed.unwrap();
     assert_eq!(data["node_count"], 1);
 }
+
+// ============================================================
+// Exit code validation (design spec: 0=success, 1=user error)
+// ============================================================
+
+#[test]
+fn test_exit_code_success() {
+    let env = TestEnv::new();
+
+    let output = env.cmd()
+        .args(["status"])
+        .output()
+        .expect("failed to run status");
+    assert_eq!(output.status.code(), Some(0), "success should exit with code 0");
+}
+
+#[test]
+fn test_exit_code_user_error_not_found() {
+    let env = TestEnv::new();
+
+    let output = env.cmd()
+        .args(["get", "nonexistent-node"])
+        .output()
+        .expect("failed to run get");
+    assert_eq!(output.status.code(), Some(1), "user error (not found) should exit with code 1");
+}
+
+#[test]
+fn test_exit_code_user_error_invalid_name() {
+    let env = TestEnv::new();
+    let content = TestEnv::make_content("test", &[], "body");
+    let file = env.write_content_file("bad", &content);
+
+    let output = env.cmd()
+        .args(["create", "INVALID_NAME", "-f"])
+        .arg(&file)
+        .output()
+        .expect("failed to run create");
+    assert_eq!(output.status.code(), Some(1), "user error (invalid name) should exit with code 1");
+}
+
+#[test]
+fn test_exit_code_user_error_duplicate() {
+    let env = TestEnv::new();
+    let content = TestEnv::make_content("dup", &[], "body");
+    let file = env.write_content_file("dup-ec", &content);
+
+    env.cmd()
+        .args(["create", "dup-ec", "-f"])
+        .arg(&file)
+        .assert()
+        .success();
+
+    let output = env.cmd()
+        .args(["create", "dup-ec", "-f"])
+        .arg(&file)
+        .output()
+        .expect("failed to run create");
+    assert_eq!(output.status.code(), Some(1), "user error (duplicate) should exit with code 1");
+}
+
+#[test]
+fn test_exit_code_user_error_delete_not_found() {
+    let env = TestEnv::new();
+
+    let output = env.cmd()
+        .args(["delete", "ghost-node"])
+        .output()
+        .expect("failed to run delete");
+    assert_eq!(output.status.code(), Some(1), "user error (delete not found) should exit with code 1");
+}
+
+#[test]
+fn test_exit_code_user_error_link_not_found() {
+    let env = TestEnv::new();
+
+    let output = env.cmd()
+        .args(["link", "ghost-a", "ghost-b"])
+        .output()
+        .expect("failed to run link");
+    assert_eq!(output.status.code(), Some(1), "user error (link not found) should exit with code 1");
+}
+
+#[test]
+fn test_exit_code_user_error_boost_not_found() {
+    let env = TestEnv::new();
+
+    let output = env.cmd()
+        .args(["boost", "ghost-node"])
+        .output()
+        .expect("failed to run boost");
+    assert_eq!(output.status.code(), Some(1), "user error (boost not found) should exit with code 1");
+}
+
+#[test]
+fn test_exit_code_user_error_rename_not_found() {
+    let env = TestEnv::new();
+
+    let output = env.cmd()
+        .args(["rename", "ghost-a", "ghost-b"])
+        .output()
+        .expect("failed to run rename");
+    assert_eq!(output.status.code(), Some(1), "user error (rename not found) should exit with code 1");
+}
+
+#[test]
+fn test_exit_code_user_error_update_not_found() {
+    let env = TestEnv::new();
+    let content = TestEnv::make_content("test", &[], "body");
+    let file = env.write_content_file("upd-ghost", &content);
+
+    let output = env.cmd()
+        .args(["update", "ghost-node", "-f"])
+        .arg(&file)
+        .output()
+        .expect("failed to run update");
+    assert_eq!(output.status.code(), Some(1), "user error (update not found) should exit with code 1");
+}
+
+#[test]
+fn test_exit_code_success_ls_empty() {
+    let env = TestEnv::new();
+
+    let output = env.cmd()
+        .args(["ls"])
+        .output()
+        .expect("failed to run ls");
+    assert_eq!(output.status.code(), Some(0), "ls on empty system should succeed with code 0");
+}
+
+#[test]
+fn test_exit_code_success_gc() {
+    let env = TestEnv::new();
+
+    let output = env.cmd()
+        .args(["gc"])
+        .output()
+        .expect("failed to run gc");
+    assert_eq!(output.status.code(), Some(0), "gc should succeed with code 0");
+}
+
+#[test]
+fn test_exit_code_success_inspect() {
+    let env = TestEnv::new();
+
+    let output = env.cmd()
+        .args(["inspect"])
+        .output()
+        .expect("failed to run inspect");
+    assert_eq!(output.status.code(), Some(0), "inspect should succeed with code 0");
+}
+
+// ============================================================
+// Daemon idle timeout (requires ~65s; skipped in regular CI)
+// ============================================================
+
+#[test]
+#[ignore] // Takes >60s — run with: cargo test test_daemon_idle_timeout -- --ignored
+fn test_daemon_idle_timeout() {
+    let env = TestEnv::new();
+
+    // Write config with idle_timeout_minutes = 0 (exits on first check at ~60s)
+    let config = "[daemon]\nidle_timeout_minutes = 0\n";
+    std::fs::write(env.dir.path().join("memcore.toml"), config).unwrap();
+
+    // Start daemon by sending a status request
+    let output = env.cmd()
+        .args(["status"])
+        .output()
+        .expect("failed to run status");
+    assert!(output.status.success(), "initial status should succeed");
+
+    // Extract PID from status output
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let pid_line = stdout.lines().find(|l| l.starts_with("pid:")).unwrap();
+    let pid: u32 = pid_line.split_whitespace().last().unwrap().parse().unwrap();
+
+    // Daemon should still be alive right now
+    assert!(
+        std::path::Path::new(&format!("/proc/{}", pid)).exists(),
+        "daemon should be alive immediately after start"
+    );
+
+    // Wait for the daemon to timeout (check interval is 60s, timeout is 0s)
+    // Allow 70s for safety margin
+    std::thread::sleep(std::time::Duration::from_secs(70));
+
+    // Daemon should have exited
+    assert!(
+        !std::path::Path::new(&format!("/proc/{}", pid)).exists(),
+        "daemon should have exited after idle timeout"
+    );
+
+    // PID file should be cleaned up
+    assert!(
+        !env.dir.path().join(".daemon.pid").exists(),
+        "pid file should be cleaned up after idle timeout"
+    );
+}

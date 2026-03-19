@@ -13,7 +13,7 @@ fn test_new_is_empty() {
 
 #[test]
 fn test_from_iter_sorts() {
-    let idx = NameIndex::from_iter(vec![
+    let idx = NameIndex::build(vec![
         "crawler".into(),
         "alpha".into(),
         "beta".into(),
@@ -23,7 +23,7 @@ fn test_from_iter_sorts() {
 
 #[test]
 fn test_from_iter_empty() {
-    let idx = NameIndex::from_iter(Vec::<String>::new());
+    let idx = NameIndex::build(Vec::<String>::new());
     assert!(idx.is_empty());
 }
 
@@ -51,14 +51,14 @@ fn test_insert_dedup() {
 
 #[test]
 fn test_insert_at_beginning() {
-    let mut idx = NameIndex::from_iter(vec!["beta".into(), "gamma".into()]);
+    let mut idx = NameIndex::build(vec!["beta".into(), "gamma".into()]);
     idx.insert("alpha".into());
     assert_eq!(idx.all()[0], "alpha");
 }
 
 #[test]
 fn test_insert_at_end() {
-    let mut idx = NameIndex::from_iter(vec!["alpha".into(), "beta".into()]);
+    let mut idx = NameIndex::build(vec!["alpha".into(), "beta".into()]);
     idx.insert("zeta".into());
     assert_eq!(idx.all().last().unwrap(), "zeta");
 }
@@ -69,7 +69,7 @@ fn test_insert_at_end() {
 
 #[test]
 fn test_remove_existing() {
-    let mut idx = NameIndex::from_iter(vec![
+    let mut idx = NameIndex::build(vec![
         "alpha".into(),
         "beta".into(),
         "gamma".into(),
@@ -81,28 +81,28 @@ fn test_remove_existing() {
 
 #[test]
 fn test_remove_nonexistent_is_noop() {
-    let mut idx = NameIndex::from_iter(vec!["alpha".into()]);
+    let mut idx = NameIndex::build(vec!["alpha".into()]);
     idx.remove("nope");
     assert_eq!(idx.len(), 1);
 }
 
 #[test]
 fn test_remove_first() {
-    let mut idx = NameIndex::from_iter(vec!["alpha".into(), "beta".into()]);
+    let mut idx = NameIndex::build(vec!["alpha".into(), "beta".into()]);
     idx.remove("alpha");
     assert_eq!(idx.all(), &["beta"]);
 }
 
 #[test]
 fn test_remove_last() {
-    let mut idx = NameIndex::from_iter(vec!["alpha".into(), "beta".into()]);
+    let mut idx = NameIndex::build(vec!["alpha".into(), "beta".into()]);
     idx.remove("beta");
     assert_eq!(idx.all(), &["alpha"]);
 }
 
 #[test]
 fn test_remove_only_element() {
-    let mut idx = NameIndex::from_iter(vec!["alpha".into()]);
+    let mut idx = NameIndex::build(vec!["alpha".into()]);
     idx.remove("alpha");
     assert!(idx.is_empty());
 }
@@ -113,14 +113,14 @@ fn test_remove_only_element() {
 
 #[test]
 fn test_contains_existing() {
-    let idx = NameIndex::from_iter(vec!["alpha".into(), "beta".into()]);
+    let idx = NameIndex::build(vec!["alpha".into(), "beta".into()]);
     assert!(idx.contains("alpha"));
     assert!(idx.contains("beta"));
 }
 
 #[test]
 fn test_contains_missing() {
-    let idx = NameIndex::from_iter(vec!["alpha".into()]);
+    let idx = NameIndex::build(vec!["alpha".into()]);
     assert!(!idx.contains("beta"));
 }
 
@@ -136,7 +136,7 @@ fn test_contains_empty_index() {
 
 #[test]
 fn test_prefix_search_exact_match() {
-    let idx = NameIndex::from_iter(vec![
+    let idx = NameIndex::build(vec![
         "crawler".into(),
         "crawler-v2".into(),
         "user-profile".into(),
@@ -147,7 +147,7 @@ fn test_prefix_search_exact_match() {
 
 #[test]
 fn test_prefix_search_partial() {
-    let idx = NameIndex::from_iter(vec![
+    let idx = NameIndex::build(vec![
         "project-alpha".into(),
         "project-beta".into(),
         "project-gamma".into(),
@@ -159,21 +159,21 @@ fn test_prefix_search_partial() {
 
 #[test]
 fn test_prefix_search_no_match() {
-    let idx = NameIndex::from_iter(vec!["alpha".into(), "beta".into()]);
+    let idx = NameIndex::build(vec!["alpha".into(), "beta".into()]);
     let results = idx.prefix_search("zz");
     assert!(results.is_empty());
 }
 
 #[test]
 fn test_prefix_search_empty_prefix_returns_all() {
-    let idx = NameIndex::from_iter(vec!["alpha".into(), "beta".into()]);
+    let idx = NameIndex::build(vec!["alpha".into(), "beta".into()]);
     let results = idx.prefix_search("");
     assert_eq!(results.len(), 2);
 }
 
 #[test]
 fn test_prefix_search_single_char() {
-    let idx = NameIndex::from_iter(vec![
+    let idx = NameIndex::build(vec![
         "alpha".into(),
         "app".into(),
         "beta".into(),
@@ -185,7 +185,7 @@ fn test_prefix_search_single_char() {
 
 #[test]
 fn test_prefix_search_full_name_only_matches_itself() {
-    let idx = NameIndex::from_iter(vec![
+    let idx = NameIndex::build(vec![
         "note".into(),
         "notebook".into(),
         "nothing".into(),
@@ -219,7 +219,7 @@ fn test_insert_then_search() {
 
 #[test]
 fn test_remove_then_search() {
-    let mut idx = NameIndex::from_iter(vec![
+    let mut idx = NameIndex::build(vec![
         "crawler-v1".into(),
         "crawler-v2".into(),
     ]);
@@ -236,7 +236,7 @@ fn test_remove_then_search() {
 #[test]
 fn test_hundred_nodes() {
     let names: Vec<String> = (0..100).map(|i| format!("node-{:03}", i)).collect();
-    let idx = NameIndex::from_iter(names);
+    let idx = NameIndex::build(names);
     assert_eq!(idx.len(), 100);
 
     // Prefix search for "node-05" should get node-050..node-059

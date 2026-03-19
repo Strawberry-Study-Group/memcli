@@ -32,6 +32,7 @@ function resolveConfig(pluginConfig: Record<string, unknown>): MemCoreConfig {
 export async function memcoreExec(
   args: string[],
   config: MemCoreConfig,
+  input?: string,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   const bin = config.binaryPath || "memcore";
   const env: Record<string, string> = { ...process.env } as Record<string, string>;
@@ -40,7 +41,7 @@ export async function memcoreExec(
   }
 
   return new Promise((resolve) => {
-    execFile(
+    const child = execFile(
       bin,
       args,
       {
@@ -62,6 +63,12 @@ export async function memcoreExec(
         }
       },
     );
+
+    // Pipe stdin content if provided (used by create/update)
+    if (input != null && child.stdin) {
+      child.stdin.write(input);
+      child.stdin.end();
+    }
   });
 }
 
@@ -101,8 +108,8 @@ export default {
         name: "memory_recall",
         label: "Memory Recall",
         description:
-          "Search through long-term memories using semantic similarity, knowledge graph proximity, and importance weighting. " +
-          "Returns ranked results combining vector search, graph traversal, and feedback-adjusted weights. " +
+          "Search through long-term memories using semantic similarity, trust weight, and vitality. " +
+          "Returns ranked results combining vector search, graph traversal, and multiplicative scoring (sim × weight × vitality). " +
           "Use this before starting any task to check if relevant knowledge already exists.",
         parameters: {
           type: "object",
@@ -324,7 +331,7 @@ export default {
         label: "Memory Link",
         description:
           "Create a bidirectional link between two memory nodes. " +
-          "Linked nodes boost each other's recall scores via graph proximity.",
+          "Linked nodes become discoverable via graph expansion during recall.",
         parameters: {
           type: "object",
           properties: {

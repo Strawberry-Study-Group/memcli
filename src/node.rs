@@ -218,6 +218,33 @@ pub fn serialize_node(frontmatter: &Frontmatter, body: &str) -> String {
     format!("---\n{}---\n\n{}", yaml, body)
 }
 
+/// Check which optional fields are explicitly present in the YAML frontmatter.
+/// Returns (has_weight, has_links) — used by `update` to decide whether to
+/// inherit old values or accept the new (possibly default) values.
+pub fn check_frontmatter_keys(content: &str) -> (bool, bool) {
+    let content = content.trim();
+    if !content.starts_with("---") {
+        return (false, false);
+    }
+    let rest = &content[3..];
+    let end = match rest.find("\n---") {
+        Some(e) => e,
+        None => return (false, false),
+    };
+    let yaml_str = &rest[..end];
+    let val: serde_yaml::Value = match serde_yaml::from_str(yaml_str) {
+        Ok(v) => v,
+        Err(_) => return (false, false),
+    };
+    let map = match val.as_mapping() {
+        Some(m) => m,
+        None => return (false, false),
+    };
+    let has_weight = map.contains_key(serde_yaml::Value::String("weight".to_string()));
+    let has_links = map.contains_key(serde_yaml::Value::String("links".to_string()));
+    (has_weight, has_links)
+}
+
 /// Compute a fast hash of a string (for abstract change detection)
 pub fn hash_abstract(text: &str) -> u64 {
     xxhash_rust::xxh64::xxh64(text.as_bytes(), 0)
@@ -269,10 +296,10 @@ pub fn list_nodes_in_dir(memories_dir: &Path) -> Result<Vec<String>, NodeError> 
     for entry in std::fs::read_dir(memories_dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("md") {
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                names.push(stem.to_string());
-            }
+        if path.extension().and_then(|e| e.to_str()) == Some("md")
+            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+        {
+            names.push(stem.to_string());
         }
     }
     Ok(names)

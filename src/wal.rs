@@ -29,6 +29,12 @@ pub struct WalWriter {
     tx_counter: u64,
 }
 
+impl Default for WalWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WalWriter {
     /// Create a WalWriter using the default memcore dir
     pub fn new() -> Self {

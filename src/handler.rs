@@ -3,6 +3,9 @@ use std::path::Path;
 use chrono::{Datelike, Utc};
 
 use crate::daemon_state::{save_graph_idx, DaemonState};
+
+/// Maximum links shown in `get` output before truncation (supernode protection, design §6.2).
+const SUPERNODE_LINK_CAP: usize = 20;
 use crate::feedback;
 use crate::node::{self, NodeMeta, PatchOp};
 use crate::protocol::*;
@@ -61,7 +64,7 @@ pub fn handle_request(
         } => handle_multi_recall(state, queries, *top_k, *depth, *full),
         Request::Status => handle_status(state),
         Request::Inspect { node: Some(name), format, .. } => handle_inspect_node(state, name, format),
-        Request::Inspect { node: None, format, threshold, cap } => handle_inspect(state, format, *threshold, *cap),
+        Request::Inspect { node: None, format, threshold, cap } => handle_inspect(state, format, *threshold, *cap, base_dir),
         Request::Reindex => handle_reindex(state, &memories_dir, base_dir),
         Request::Gc => handle_gc(state, &memories_dir, base_dir),
         Request::Baseline => handle_baseline(state, base_dir),
@@ -139,10 +142,10 @@ fn handle_create(
     for link in &links {
         state.graph.add_edge(name, link);
         // Update peer's in-memory links
-        if let Some(peer_meta) = state.node_metas.get_mut(link.as_str()) {
-            if !peer_meta.links.contains(&name.to_string()) {
-                peer_meta.links.push(name.to_string());
-            }
+        if let Some(peer_meta) = state.node_metas.get_mut(link.as_str())
+            && !peer_meta.links.contains(&name.to_string())
+        {
+            peer_meta.links.push(name.to_string());
         }
     }
     state.graph.ensure_node(name);
@@ -161,9 +164,13 @@ fn handle_create(
     #[cfg(feature = "embedding")]
     {
         if let Some(ref mut model) = state.embedding_model {
-            match model.compute(&frontmatter.abstract_text) {
+            match model.compute_passage(&frontmatter.abstract_text) {
                 Ok(embedding) => {
-                    state.vector_index.insert(name, &embedding);
+                    if let Err(e) = state.vector_index.insert(name, &embedding) {
+                        tracing::warn!("index insert failed for {}: {} — run `reindex`", name, e);
+                    } else {
+                        state.index_dirty = true;
+                    }
                 }
                 Err(e) => {
                     tracing::warn!("embedding failed for {}: {}", name, e);
@@ -214,6 +221,29 @@ fn handle_get(
             Err(e) => return Response::system_error(format!("read error: {}", e)),
         };
 
+        // Supernode protection: truncate links in output when >20 (design §6.2)
+        let link_count = state.node_metas.get(name.as_str()).map(|m| m.links.len()).unwrap_or(0);
+        let content = if link_count > SUPERNODE_LINK_CAP {
+            match node::parse_node_file(&content) {
+                Ok((mut fm, body)) => {
+                    let total = fm.links.len();
+                    fm.links.truncate(SUPERNODE_LINK_CAP);
+                    let hint = format!(
+                        "# [+{} more links, use 'memcore neighbors {}' to explore]",
+                        total - SUPERNODE_LINK_CAP, name
+                    );
+                    let mut out = node::serialize_node(&fm, &body);
+                    out.push('\n');
+                    out.push_str(&hint);
+                    out.push('\n');
+                    out
+                }
+                Err(_) => content,
+            }
+        } else {
+            content
+        };
+
         // Update access metadata in memory, mark dirty for async flush
         if let Some(meta) = state.node_metas.get_mut(name.as_str()) {
             meta.last_accessed = Utc::now();
@@ -258,16 +288,29 @@ fn handle_update(
         Err(e) => return Response::user_error(format!("invalid content: {}", e)),
     };
 
-    let old_meta = state.node_metas.get(name).unwrap().clone();
+    let old_meta = match state.node_metas.get(name) {
+        Some(m) => m.clone(),
+        None => return Response::system_error(format!("node '{}' metadata missing", name)),
+    };
+
+    // Check which optional fields are explicitly present in the YAML.
+    // If weight/links are absent, inherit from old values (design §6.2).
+    let (has_weight, has_links) = node::check_frontmatter_keys(content);
 
     // Preserve system-managed fields
     new_fm.created = old_meta.created;
     new_fm.updated = Utc::now();
     new_fm.access_count = old_meta.access_count;
 
-    // Weight: if not explicitly set (default 1.0), inherit historical
-    // (We can't truly detect "not set" since YAML parse gives default,
-    //  so we accept the declared value)
+    // Weight: inherit old value if not explicitly set
+    if !has_weight {
+        new_fm.weight = old_meta.weight;
+    }
+
+    // Links: inherit old value if not explicitly set
+    if !has_links {
+        new_fm.links = old_meta.links.clone();
+    }
 
     // Validate links
     let new_links = match node::validate_links(name, &new_fm.links) {
@@ -304,10 +347,10 @@ fn handle_update(
     // Update graph
     for link in &added {
         state.graph.add_edge(name, link);
-        if let Some(peer) = state.node_metas.get_mut(*link) {
-            if !peer.links.contains(&name.to_string()) {
-                peer.links.push(name.to_string());
-            }
+        if let Some(peer) = state.node_metas.get_mut(*link)
+            && !peer.links.contains(&name.to_string())
+        {
+            peer.links.push(name.to_string());
         }
     }
     for link in &removed {
@@ -340,9 +383,13 @@ fn handle_update(
         let new_hash = crate::node::hash_abstract(&new_fm.abstract_text);
         if new_hash != old_meta.abstract_hash {
             if let Some(ref mut model) = state.embedding_model {
-                match model.compute(&new_fm.abstract_text) {
+                match model.compute_passage(&new_fm.abstract_text) {
                     Ok(embedding) => {
-                        state.vector_index.insert(name, &embedding);
+                        if let Err(e) = state.vector_index.insert(name, &embedding) {
+                            tracing::warn!("index insert failed for {}: {} — run `reindex`", name, e);
+                        } else {
+                            state.index_dirty = true;
+                        }
                     }
                     Err(e) => {
                         tracing::warn!("re-embedding failed for {}: {}", name, e);
@@ -467,7 +514,9 @@ fn handle_delete(
         // Remove from indices
         state.name_index.remove(name);
         state.node_metas.remove(name);
-        state.vector_index.remove(name);
+        if state.vector_index.remove(name) {
+            state.index_dirty = true;
+        }
 
         // Update peer .md files
         for neighbor in &neighbors {
@@ -553,7 +602,9 @@ fn handle_rename(
     }
 
     // Rename vector index entry
-    state.vector_index.rename(old, new);
+    if state.vector_index.rename(old, new) {
+        state.index_dirty = true;
+    }
 
     // Rename file on disk
     let old_path = memories_dir.join(format!("{}.md", old));
@@ -650,15 +701,15 @@ fn handle_link(
     state.graph.add_edge(a, b);
 
     // Update in-memory links
-    if let Some(meta_a) = state.node_metas.get_mut(a) {
-        if !meta_a.links.contains(&b.to_string()) {
-            meta_a.links.push(b.to_string());
-        }
+    if let Some(meta_a) = state.node_metas.get_mut(a)
+        && !meta_a.links.contains(&b.to_string())
+    {
+        meta_a.links.push(b.to_string());
     }
-    if let Some(meta_b) = state.node_metas.get_mut(b) {
-        if !meta_b.links.contains(&a.to_string()) {
-            meta_b.links.push(a.to_string());
-        }
+    if let Some(meta_b) = state.node_metas.get_mut(b)
+        && !meta_b.links.contains(&a.to_string())
+    {
+        meta_b.links.push(a.to_string());
     }
 
     // Update .md files
@@ -879,7 +930,7 @@ fn handle_search(
             Some(m) => m,
             None => return Response::system_error("embedding model not loaded".into()),
         };
-        let query_embedding = match model.compute(query) {
+        let query_embedding = match model.compute_query(query) {
             Ok(e) => e,
             Err(e) => return Response::system_error(format!("embedding error: {}", e)),
         };
@@ -893,6 +944,7 @@ fn handle_search(
                     score: hit.similarity,
                     similarity: hit.similarity,
                     weight: meta.map(|m| m.weight).unwrap_or(0.0),
+                    vitality: 0.0,
                     abstract_text: meta
                         .map(|m| m.abstract_text.clone())
                         .unwrap_or_default(),
@@ -928,7 +980,7 @@ fn handle_multi_search(
         // Compute all embeddings first (fail fast)
         let mut embeddings = Vec::with_capacity(queries.len());
         for q in queries {
-            match model.compute(q) {
+            match model.compute_query(q) {
                 Ok(e) => embeddings.push(e),
                 Err(e) => return Response::system_error(format!("embedding error: {}", e)),
             }
@@ -944,6 +996,7 @@ fn handle_multi_search(
                     score: hit.similarity,
                     similarity: hit.similarity,
                     weight: meta.map(|m| m.weight).unwrap_or(0.0),
+                    vitality: 0.0,
                     abstract_text: meta
                         .map(|m| m.abstract_text.clone())
                         .unwrap_or_default(),
@@ -981,7 +1034,7 @@ fn handle_multi_recall(
         // Compute all embeddings first (fail fast)
         let mut embeddings = Vec::with_capacity(queries.len());
         for q in queries {
-            match model.compute(q) {
+            match model.compute_query(q) {
                 Ok(e) => embeddings.push(e),
                 Err(e) => return Response::system_error(format!("embedding error: {}", e)),
             }
@@ -1004,6 +1057,7 @@ fn handle_multi_recall(
                     score: r.score,
                     similarity: r.similarity,
                     weight: r.weight,
+                    vitality: r.vitality,
                     abstract_text: r.abstract_text,
                 })
                 .collect();
@@ -1052,7 +1106,7 @@ fn handle_recall(
                 Some(m) => m,
                 None => return Response::system_error("embedding model not loaded".into()),
             };
-            let query_embedding = match model.compute(query_text) {
+            let query_embedding = match model.compute_query(query_text) {
                 Ok(e) => e,
                 Err(e) => return Response::system_error(format!("embedding error: {}", e)),
             };
@@ -1073,6 +1127,7 @@ fn handle_recall(
                         score: r.score,
                         similarity: r.similarity,
                         weight: r.weight,
+                        vitality: r.vitality,
                         abstract_text: r.abstract_text,
                     })
                     .collect();
@@ -1138,6 +1193,7 @@ fn names_to_search_results(
                 score: meta.map(|m| m.weight).unwrap_or(0.0),
                 similarity: 0.0,
                 weight: meta.map(|m| m.weight).unwrap_or(0.0),
+                vitality: 0.0,
                 abstract_text: meta.map(|m| m.abstract_text.clone()).unwrap_or_default(),
             }
         })
@@ -1222,7 +1278,7 @@ fn handle_inspect_node(state: &DaemonState, name: &str, format: &OutputFormat) -
     }
 }
 
-fn handle_inspect(state: &DaemonState, format: &OutputFormat, threshold: Option<f32>, cap: Option<usize>) -> Response {
+fn handle_inspect(state: &DaemonState, format: &OutputFormat, threshold: Option<f32>, cap: Option<usize>, base_dir: &Path) -> Response {
     let node_count = state.name_index.len();
     let edge_count = state.graph.edge_count();
     let components = state.graph.connected_components();
@@ -1252,10 +1308,8 @@ fn handle_inspect(state: &DaemonState, format: &OutputFormat, threshold: Option<
         0.0
     };
 
-    // Health score: penalize bad signals, don't reward raw connectivity.
-    // Weights: orphan 0.10, graveyard 0.25, density_imbalance 0.10.
-    // Orphan and density weights are deliberately low so that linking
-    // unrelated nodes doesn't significantly inflate the score.
+    // Health score (v1 simplified 3-item formula, per design §9.3):
+    //   Health = 1 - (0.20 × OrphanRatio + 0.20 × GraveyardRatio + 0.15 × DensityImbalance)
     let density_imbalance = if node_count <= 1 {
         0.0 // Not meaningful for 0-1 nodes
     } else if density < 1.5 {
@@ -1267,7 +1321,7 @@ fn handle_inspect(state: &DaemonState, format: &OutputFormat, threshold: Option<
     };
 
     let health = 1.0
-        - (0.10 * orphan_ratio + 0.25 * graveyard_ratio + 0.10 * density_imbalance);
+        - (0.20 * orphan_ratio + 0.20 * graveyard_ratio + 0.15 * density_imbalance);
 
     let orphans: Vec<String> = state
         .node_metas
@@ -1293,7 +1347,11 @@ fn handle_inspect(state: &DaemonState, format: &OutputFormat, threshold: Option<
     // Uses a bounded min-heap to avoid O(N^2) memory for output,
     // and a HashSet<usize> (bounded by N) for redundancy tracking.
     let max_similar_pairs = cap.unwrap_or(50);
-    let sim_threshold = threshold.unwrap_or(0.85);
+
+    // Use baseline P95 as threshold when available (design §9.3), fall back to
+    // explicit --threshold or default 0.85.
+    let baseline_p95 = load_baseline_p95(base_dir);
+    let sim_threshold = threshold.unwrap_or_else(|| baseline_p95.unwrap_or(0.85));
     let mut names: Vec<&str> = state.vector_index.all_node_names();
     names.sort(); // deterministic ordering
 
@@ -1306,13 +1364,13 @@ fn handle_inspect(state: &DaemonState, format: &OutputFormat, threshold: Option<
     let mut nodes_in_pairs: std::collections::HashSet<usize> = std::collections::HashSet::new();
     let mut total_above_threshold: usize = 0;
 
-    for i in 0..names.len() {
-        let emb_a = match state.vector_index.get_embedding(names[i]) {
+    for (i, name_a) in names.iter().enumerate() {
+        let emb_a = match state.vector_index.get_embedding(name_a) {
             Some(e) => e,
             None => continue,
         };
-        for j in (i + 1)..names.len() {
-            let emb_b = match state.vector_index.get_embedding(names[j]) {
+        for (j, name_b) in names.iter().enumerate().skip(i + 1) {
+            let emb_b = match state.vector_index.get_embedding(name_b) {
                 Some(e) => e,
                 None => continue,
             };
@@ -1439,6 +1497,10 @@ fn handle_reindex(
             None => return Response::system_error("embedding model not loaded".into()),
         };
 
+        // Reset index to model's dimensions — handles model swaps where
+        // the old index has different dimensions than the new model.
+        state.vector_index = VectorIndex::with_dimensions(model.dimensions);
+
         let mut indexed = 0usize;
         let mut errors = 0usize;
 
@@ -1450,10 +1512,14 @@ fn handle_reindex(
             .collect();
 
         for (name, abstract_text) in &nodes {
-            match model.compute(abstract_text) {
+            match model.compute_passage(abstract_text) {
                 Ok(embedding) => {
-                    state.vector_index.insert(name, &embedding);
-                    indexed += 1;
+                    if let Err(e) = state.vector_index.insert(name, &embedding) {
+                        tracing::warn!("reindex: index insert failed for {}: {}", name, e);
+                        errors += 1;
+                    } else {
+                        indexed += 1;
+                    }
                 }
                 Err(e) => {
                     tracing::warn!("reindex: embedding failed for {}: {}", name, e);
@@ -1465,6 +1531,7 @@ fn handle_reindex(
         // Save updated index
         let index_dir = base_dir.join("index");
         let _ = state.vector_index.save_to_dir(&index_dir);
+        state.index_dirty = false;
 
         return Response::ok(ResponseBody::Message(format!(
             "reindex: {} nodes indexed, {} errors",
@@ -1496,13 +1563,13 @@ fn handle_baseline(
         let names = state.vector_index.all_node_names();
         let mut similarities: Vec<f32> = Vec::new();
 
-        for i in 0..names.len() {
-            let emb_a = match state.vector_index.get_embedding(names[i]) {
+        for (i, name_a) in names.iter().enumerate() {
+            let emb_a = match state.vector_index.get_embedding(name_a) {
                 Some(e) => e,
                 None => continue,
             };
-            for j in (i + 1)..names.len() {
-                let emb_b = match state.vector_index.get_embedding(names[j]) {
+            for name_b in names.iter().skip(i + 1) {
+                let emb_b = match state.vector_index.get_embedding(name_b) {
                     Some(e) => e,
                     None => continue,
                 };
@@ -1593,6 +1660,18 @@ impl Ord for SimPairEntry {
             .partial_cmp(&other.similarity)
             .unwrap_or(std::cmp::Ordering::Equal)
     }
+}
+
+// ============================================================
+// Baseline helper
+// ============================================================
+
+/// Load baseline P95 from `index/mem-base-info.json` if available.
+fn load_baseline_p95(base_dir: &Path) -> Option<f32> {
+    let info_path = base_dir.join("index").join("mem-base-info.json");
+    let content = std::fs::read_to_string(info_path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+    json["p95"].as_f64().map(|v| v as f32)
 }
 
 // ============================================================

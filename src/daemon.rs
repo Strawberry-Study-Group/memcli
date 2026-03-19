@@ -2,6 +2,8 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 
+use fs2::FileExt;
+
 use crate::config;
 use crate::daemon_state::{self, DaemonState};
 use crate::handler;
@@ -22,6 +24,20 @@ pub async fn run() -> anyhow::Result<()> {
 
     // Ensure base dir exists
     std::fs::create_dir_all(&base_dir)?;
+
+    // Acquire exclusive lock to prevent concurrent daemon starts (issue #7).
+    // The lock is held for the daemon's lifetime and released automatically on exit.
+    let lock_path = base_dir.join(".daemon.lock");
+    let lock_file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&lock_path)?;
+    lock_file.try_lock_exclusive().map_err(|_| {
+        anyhow::anyhow!("another daemon is already starting (lock held on .daemon.lock)")
+    })?;
+    // Keep lock_file alive — lock released when daemon exits.
+    let _lock_guard = lock_file;
 
     // Load state from disk (includes WAL recovery + consistency check)
     let state = daemon_state::load_state_from_dir(&base_dir)?;
@@ -58,20 +74,27 @@ pub async fn run() -> anyhow::Result<()> {
 
     // Idle timeout task
     let idle_last = Arc::clone(&last_activity);
+    let idle_state = Arc::clone(&daemon.state);
+    let idle_dir = base_dir.clone();
     tokio::spawn(async move {
         let timeout = std::time::Duration::from_secs(idle_timeout_mins * 60);
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             let last = *idle_last.lock().await;
             if last.elapsed() > timeout {
-                tracing::info!("idle timeout reached, shutting down");
+                tracing::info!("idle timeout reached, flushing and shutting down");
+                {
+                    let mut state = idle_state.lock().await;
+                    daemon_state::flush_access_metadata(&mut state, &idle_dir);
+                    daemon_state::flush_vector_index(&mut state, &idle_dir);
+                }
                 cleanup_pid_file();
                 std::process::exit(0);
             }
         }
     });
 
-    // Periodic access metadata flush (every 60s)
+    // Periodic flush (every 60s): access metadata + vector index
     let flush_state = Arc::clone(&daemon.state);
     let flush_dir = base_dir.clone();
     tokio::spawn(async move {
@@ -79,6 +102,7 @@ pub async fn run() -> anyhow::Result<()> {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             let mut state = flush_state.lock().await;
             daemon_state::flush_access_metadata(&mut state, &flush_dir);
+            daemon_state::flush_vector_index(&mut state, &flush_dir);
         }
     });
 
@@ -168,12 +192,13 @@ async fn handle_connection(
     writer.write_all(&resp_bytes).await?;
     writer.flush().await?;
 
-    // Step 6: Handle stop — flush dirty access metadata before exit
+    // Step 6: Handle stop — flush dirty state before exit
     if is_stop {
         tracing::info!("stop command received, flushing and shutting down");
         {
             let mut state = daemon.state.lock().await;
             daemon_state::flush_access_metadata(&mut state, base_dir);
+            daemon_state::flush_vector_index(&mut state, base_dir);
         }
         cleanup_pid_file();
         // Give the response time to be sent
@@ -201,6 +226,7 @@ fn write_pid_file(port: u16, nonce: &str) -> std::io::Result<()> {
 }
 
 fn cleanup_pid_file() {
-    let path = config::memcore_dir().join(".daemon.pid");
-    let _ = std::fs::remove_file(path);
+    let dir = config::memcore_dir();
+    let _ = std::fs::remove_file(dir.join(".daemon.pid"));
+    let _ = std::fs::remove_file(dir.join(".daemon.lock"));
 }

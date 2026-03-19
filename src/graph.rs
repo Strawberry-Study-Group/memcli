@@ -36,7 +36,7 @@ impl Graph {
         let removed = self
             .adjacency
             .get_mut(a)
-            .map_or(false, |s| s.remove(b));
+            .is_some_and(|s| s.remove(b));
         if removed {
             if let Some(set) = self.adjacency.get_mut(b) {
                 set.remove(a);
@@ -64,12 +64,12 @@ impl Graph {
             if depth > 0 {
                 result.push((node.clone(), depth));
             }
-            if depth < max_depth {
-                if let Some(neighbors) = self.adjacency.get(&node) {
-                    for neighbor in neighbors {
-                        if visited.insert(neighbor.clone()) {
-                            queue.push_back((neighbor.clone(), depth + 1));
-                        }
+            if depth < max_depth
+                && let Some(neighbors) = self.adjacency.get(&node)
+            {
+                for neighbor in neighbors {
+                    if visited.insert(neighbor.clone()) {
+                        queue.push_back((neighbor.clone(), depth + 1));
                     }
                 }
             }
@@ -146,7 +146,7 @@ impl Graph {
     pub fn has_edge(&self, a: &str, b: &str) -> bool {
         self.adjacency
             .get(a)
-            .map_or(false, |s| s.contains(b))
+            .is_some_and(|s| s.contains(b))
     }
 
     /// Rename a node in the graph, updating all neighbor references.

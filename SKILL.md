@@ -12,17 +12,41 @@ Do NOT use built-in memory files (`MEMORY.md`, `~/.claude/projects/*/memory/`).
 4. **After acting**: `memcore boost` what helped, `memcore penalize` what misled
 5. **Before web search**: `memcore recall` first — skip the web if it's already in memory
 6. **After web search**: store findings with `memcore create` so you never search again
+7. **Before answering from memory**: `memcore get <name>` to read the full node body — recall only returns names/abstracts, not full content
+
+## Recall strategy — escalate on miss
+
+Recall may not return relevant results on the first try. Use this escalation:
+
+```
+Level 1:  memcore recall "your query"                          # default top-k
+Level 2:  memcore recall "your query" --top-k 10               # cast wider net
+Level 3:  memcore multi-recall "query v1" "rephrased query"    # try different phrasings
+Level 4:  memcore multi-recall "keyword" "synonym" --top-k 10  # max coverage
+```
+
+- **Always start at Level 1.** Only escalate if results look irrelevant or empty.
+- **Rephrase with different vocabulary** — if "auth migration" returns nothing, try "OAuth2 upgrade" or "session store replacement"
+- **Use multi-recall** to combine a specific query with a broader one (e.g., `"Alice OAuth2 meeting"` + `"auth system changes"`)
+- After recall, **always `memcore get` the nodes** before using their content — the recall summary is for relevance ranking, not for answering questions
 
 ## Node format
 
 ```yaml
 ---
-abstract: Brief description of this memory (this gets embedded for search)
+abstract: Dense summary with key dates, names, and 3–4 core facts (this gets embedded for search)
 links: [related-node]    # optional, bidirectional
 pinned: true              # optional, always in working memory
 ---
-Body in markdown.
+Body in markdown — full details, context, reasoning.
 ```
+
+**Abstract rules — this is critical for recall quality:**
+- Include **dates** (when it happened), **names** (people, projects, tools), and **key facts** (decisions, outcomes, numbers)
+- The abstract is the ONLY thing the vector index sees. If a fact isn't in the abstract, recall won't find it
+- Good: `"2026-03-15 meeting with Alice — decided to migrate auth to OAuth2, deadline April 1, blocked by legacy session store"`
+- Bad: `"Notes from a meeting about auth"`
+- Think of it as: if someone searches for any key detail, will this abstract match?
 
 Names: letters, digits, spaces, hyphens; 2-128 chars; start with a letter, end with letter/digit. Use descriptive names — they're prefix-searchable.
 
@@ -77,7 +101,7 @@ memcore multi-search "q1" "q2" [--top-k 5]       # multi-term vector search (wid
 memcore ls [--sort name|weight|date]
 ```
 
-Scoring: `score = 0.6 × similarity + 0.2 × weight + 0.2 × graph_proximity` (configurable in memcore.toml).
+Scoring: `score = similarity × weight × vitality` — multiplicative, no coefficients. New nodes start hot (vitality=1.0), decay with age, frequent access slows decay. Floor configurable via `vitality_floor` in memcore.toml.
 
 ### Graph & feedback
 ```bash

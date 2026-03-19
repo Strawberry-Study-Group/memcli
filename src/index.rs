@@ -13,11 +13,18 @@ pub struct EmbeddingModel {
     tokenizer: tokenizers::Tokenizer,
     pub dimensions: usize,
     max_tokens: usize,
+    /// Whether the ONNX model accepts token_type_ids as an input
+    pub has_token_type_ids: bool,
+    pub query_prefix: Option<String>,
+    pub passage_prefix: Option<String>,
 }
 
 #[cfg(feature = "embedding")]
 impl EmbeddingModel {
     /// Load model from a directory containing model_quantized.onnx, tokenizer.json, config.json.
+    ///
+    /// Probes the model at load time with a short inference to discover actual
+    /// output dimensions. Config.json is advisory — the probed value is authoritative.
     pub fn load(models_dir: &Path) -> Result<Self, IndexError> {
         let model_path = models_dir.join("model_quantized.onnx");
         let tokenizer_path = models_dir.join("tokenizer.json");
@@ -32,17 +39,21 @@ impl EmbeddingModel {
             ));
         }
 
-        // Load config
-        let (dimensions, max_tokens) = if config_path.exists() {
-            let config_str = std::fs::read_to_string(&config_path)?;
-            let config: serde_json::Value = serde_json::from_str(&config_str)
-                .map_err(|e| IndexError::EmbeddingFailed(format!("config parse error: {}", e)))?;
-            let dims = config["dimensions"].as_u64().unwrap_or(384) as usize;
-            let max_tok = config["max_tokens"].as_u64().unwrap_or(256) as usize;
-            (dims, max_tok)
-        } else {
-            (384, 256)
-        };
+        // Load config (advisory — dimensions may disagree with actual model)
+        let (config_dimensions, max_tokens, query_prefix, passage_prefix) =
+            if config_path.exists() {
+                let config_str = std::fs::read_to_string(&config_path)?;
+                let config: serde_json::Value = serde_json::from_str(&config_str).map_err(
+                    |e| IndexError::EmbeddingFailed(format!("config parse error: {}", e)),
+                )?;
+                let dims = config["dimensions"].as_u64().unwrap_or(384) as usize;
+                let max_tok = config["max_tokens"].as_u64().unwrap_or(256) as usize;
+                let qp = config["query_prefix"].as_str().map(|s| s.to_string());
+                let pp = config["passage_prefix"].as_str().map(|s| s.to_string());
+                (dims, max_tok, qp, pp)
+            } else {
+                (384, 256, None, None)
+            };
 
         // Load ONNX model
         let session = ort::session::Session::builder()
@@ -56,24 +67,81 @@ impl EmbeddingModel {
         let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| IndexError::EmbeddingFailed(format!("tokenizer error: {}", e)))?;
 
-        tracing::info!(
-            "loaded embedding model: dims={}, max_tokens={}",
-            dimensions,
-            max_tokens
-        );
+        // Check if the ONNX model accepts token_type_ids
+        let has_token_type_ids = session
+            .inputs()
+            .iter()
+            .any(|input| input.name() == "token_type_ids");
 
-        Ok(Self {
+        // Build model with placeholder dimensions, then probe
+        let mut model = Self {
             session,
             tokenizer,
-            dimensions,
+            dimensions: 0,
             max_tokens,
-        })
+            has_token_type_ids,
+            query_prefix,
+            passage_prefix,
+        };
+
+        // Probe: run one inference to discover actual output dimensions
+        let probe_embedding = model
+            .compute_raw("probe")
+            .map_err(|e| IndexError::EmbeddingFailed(format!("probe inference failed: {}", e)))?;
+        let probed_dimensions = probe_embedding.len();
+
+        if config_dimensions != probed_dimensions {
+            tracing::warn!(
+                "config.json dimensions ({}) disagree with model output ({}), using probed value",
+                config_dimensions,
+                probed_dimensions
+            );
+        }
+
+        model.dimensions = probed_dimensions;
+
+        tracing::info!(
+            "loaded embedding model: dims={} (probed), max_tokens={}, has_token_type_ids={}, query_prefix={:?}, passage_prefix={:?}",
+            probed_dimensions,
+            max_tokens,
+            has_token_type_ids,
+            model.query_prefix,
+            model.passage_prefix,
+        );
+
+        Ok(model)
     }
 
-    /// Compute embedding for a text string.
+    /// Compute embedding for a query text (search, recall).
     ///
-    /// Pipeline: tokenize → truncate → ONNX inference → mean pooling → L2 normalize
-    pub fn compute(&mut self, text: &str) -> Result<Vec<f32>, IndexError> {
+    /// Prepends `query_prefix` if configured (e.g. `"query: "` for e5 models).
+    pub fn compute_query(&mut self, text: &str) -> Result<Vec<f32>, IndexError> {
+        match &self.query_prefix {
+            Some(prefix) => {
+                let prefixed = format!("{}{}", prefix, text);
+                self.compute_raw(&prefixed)
+            }
+            None => self.compute_raw(text),
+        }
+    }
+
+    /// Compute embedding for a passage/document text (create, update, reindex).
+    ///
+    /// Prepends `passage_prefix` if configured (e.g. `"passage: "` for e5 models).
+    pub fn compute_passage(&mut self, text: &str) -> Result<Vec<f32>, IndexError> {
+        match &self.passage_prefix {
+            Some(prefix) => {
+                let prefixed = format!("{}{}", prefix, text);
+                self.compute_raw(&prefixed)
+            }
+            None => self.compute_raw(text),
+        }
+    }
+
+    /// Raw embedding pipeline: tokenize → truncate → ONNX inference → mean pooling → L2 normalize.
+    ///
+    /// Called by `compute_query` and `compute_passage`. No prefix applied.
+    fn compute_raw(&mut self, text: &str) -> Result<Vec<f32>, IndexError> {
         let encoding = self
             .tokenizer
             .encode(text, true)
@@ -102,15 +170,19 @@ impl EmbeddingModel {
                 .map_err(|e| {
                     IndexError::EmbeddingFailed(format!("attention_mask tensor error: {}", e))
                 })?;
-        let type_tensor = ort::value::Tensor::from_array(([1usize, seq_len], token_type_ids))
-            .map_err(|e| {
-                IndexError::EmbeddingFailed(format!("token_type_ids tensor error: {}", e))
-            })?;
-
-        let outputs = self
-            .session
-            .run(ort::inputs![ids_tensor, mask_tensor, type_tensor])
-            .map_err(|e| IndexError::EmbeddingFailed(format!("inference error: {}", e)))?;
+        let outputs = if self.has_token_type_ids {
+            let type_tensor =
+                ort::value::Tensor::from_array(([1usize, seq_len], token_type_ids)).map_err(
+                    |e| IndexError::EmbeddingFailed(format!("token_type_ids tensor error: {}", e)),
+                )?;
+            self.session
+                .run(ort::inputs![ids_tensor, mask_tensor, type_tensor])
+                .map_err(|e| IndexError::EmbeddingFailed(format!("inference error: {}", e)))?
+        } else {
+            self.session
+                .run(ort::inputs![ids_tensor, mask_tensor])
+                .map_err(|e| IndexError::EmbeddingFailed(format!("inference error: {}", e)))?
+        };
 
         // Output shape: [1, seq_len, hidden_size]
         let (output_shape, output_data) = outputs[0]
@@ -179,6 +251,12 @@ pub struct VectorIndex {
     dimensions: Option<usize>,
 }
 
+impl Default for VectorIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VectorIndex {
     pub fn new() -> Self {
         Self {
@@ -200,17 +278,18 @@ impl VectorIndex {
     /// Insert an embedding for a node. Returns the assigned vector ID.
     ///
     /// If the node already exists, its embedding is overwritten.
-    /// Panics if embedding dimensions don't match previously inserted vectors.
-    pub fn insert(&mut self, node_name: &str, embedding: &[f32]) -> u64 {
+    /// Returns `Err` if embedding dimensions don't match previously inserted vectors
+    /// (e.g. after a model swap without reindex).
+    pub fn insert(&mut self, node_name: &str, embedding: &[f32]) -> Result<u64, IndexError> {
         match self.dimensions {
             Some(dim) => {
-                assert_eq!(
-                    embedding.len(),
-                    dim,
-                    "dimension mismatch: expected {}, got {}",
-                    dim,
-                    embedding.len()
-                );
+                if embedding.len() != dim {
+                    return Err(IndexError::EmbeddingFailed(format!(
+                        "dimension mismatch: index expects {}, got {} — run `reindex`",
+                        dim,
+                        embedding.len()
+                    )));
+                }
             }
             None => {
                 self.dimensions = Some(embedding.len());
@@ -224,7 +303,7 @@ impl VectorIndex {
         self.next_id += 1;
         self.embeddings
             .insert(node_name.to_string(), (id, embedding.to_vec()));
-        id
+        Ok(id)
     }
 
     /// Remove a node from the vector index. Returns true if it existed.
@@ -235,8 +314,21 @@ impl VectorIndex {
     /// Search for top-k most similar nodes using brute-force cosine similarity.
     ///
     /// Returns results sorted by descending similarity.
+    /// Returns empty if query dimensions don't match index dimensions (model swap without reindex).
     pub fn search(&self, query_embedding: &[f32], top_k: usize) -> Vec<SearchResult> {
         if top_k == 0 || self.embeddings.is_empty() {
+            return Vec::new();
+        }
+
+        // Dimension mismatch guard: query from new model vs stale index
+        if let Some(dim) = self.dimensions
+            && query_embedding.len() != dim
+        {
+            tracing::warn!(
+                "search skipped: query dimensions ({}) != index dimensions ({}) — run `reindex`",
+                query_embedding.len(),
+                dim
+            );
             return Vec::new();
         }
 

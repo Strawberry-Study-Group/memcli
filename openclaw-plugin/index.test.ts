@@ -442,6 +442,50 @@ describe("memory_inspect", () => {
 // ---------------------------------------------------------------------------
 
 describe("memcoreExec", () => {
+  it("pipes stdin when input is provided", async () => {
+    // Track stdin writes
+    const stdinWrites: string[] = [];
+    let stdinEnded = false;
+    mockedExecFile.mockImplementation(
+      (_cmd: any, _args: any, _opts: any, callback?: any) => {
+        if (typeof callback === "function") {
+          callback(null, "created", "");
+        }
+        return {
+          stdin: {
+            write: (data: string) => stdinWrites.push(data),
+            end: () => { stdinEnded = true; },
+          },
+        } as any;
+      },
+    );
+
+    await memcoreExec(["create", "test-node"], {}, "---\nabstract: test\n---\nbody");
+
+    expect(stdinWrites).toHaveLength(1);
+    expect(stdinWrites[0]).toContain("abstract: test");
+    expect(stdinEnded).toBe(true);
+  });
+
+  it("does not pipe stdin when input is undefined", async () => {
+    let stdinAccessed = false;
+    mockedExecFile.mockImplementation(
+      (_cmd: any, _args: any, _opts: any, callback?: any) => {
+        if (typeof callback === "function") {
+          callback(null, "ok", "");
+        }
+        return {
+          get stdin() { stdinAccessed = true; return null; },
+        } as any;
+      },
+    );
+
+    await memcoreExec(["status"], {});
+
+    // stdin should not be written to
+    expect(stdinAccessed).toBe(false);
+  });
+
   it("uses default binary name when not configured", async () => {
     mockExecSuccess("ok");
 

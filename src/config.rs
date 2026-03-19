@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Global configuration from memcore.toml
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub index: IndexConfig,
@@ -38,56 +38,12 @@ pub struct WeightConfig {
     pub warn_threshold: f32,
 }
 
-/// How graph proximity is computed from BFS hop distance.
-///
-/// Add new variants here to plug in alternative proximity formulas.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum ProximityMetric {
-    /// `1 / (1 + hops)` — simple inverse hop distance.
-    /// Seed nodes (hops=0) get proximity 0 (they already have a similarity score).
-    EdgeDistance,
-    /// `1 / (1 + hops)^2` — sharper falloff, strongly favours direct neighbours.
-    EdgeDistanceSquared,
-}
-
-impl Default for ProximityMetric {
-    fn default() -> Self {
-        Self::EdgeDistance
-    }
-}
-
-impl ProximityMetric {
-    /// Compute graph proximity score for a candidate at `hops` distance from a seed.
-    ///
-    /// Returns 0.0 for seed nodes (hops == 0) since their contribution comes
-    /// from the similarity term instead.
-    pub fn compute(&self, hops: usize) -> f32 {
-        if hops == 0 {
-            return 0.0;
-        }
-        match self {
-            Self::EdgeDistance => 1.0 / (1.0 + hops as f32),
-            Self::EdgeDistanceSquared => {
-                let d = 1.0 + hops as f32;
-                1.0 / (d * d)
-            }
-        }
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RecallConfig {
-    #[serde(default = "default_alpha")]
-    pub alpha: f32,
-    #[serde(default = "default_beta")]
-    pub beta: f32,
-    #[serde(default = "default_gamma")]
-    pub gamma: f32,
+    #[serde(default = "default_vitality_floor")]
+    pub vitality_floor: f32,
     #[serde(default = "default_depth")]
     pub default_depth: usize,
-    #[serde(default)]
-    pub proximity_metric: ProximityMetric,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -114,6 +70,8 @@ pub struct ModelConfig {
     pub name: String,
     pub dimensions: usize,
     pub max_tokens: usize,
+    pub query_prefix: Option<String>,
+    pub passage_prefix: Option<String>,
 }
 
 // --- Defaults ---
@@ -127,9 +85,7 @@ fn default_boost_amount() -> f32 { 0.1 }
 fn default_penalty_factor() -> f32 { 0.8 }
 fn default_warn_threshold() -> f32 { 0.1 }
 
-fn default_alpha() -> f32 { 0.6 }
-fn default_beta() -> f32 { 0.2 }
-fn default_gamma() -> f32 { 0.2 }
+fn default_vitality_floor() -> f32 { 0.05 }
 fn default_depth() -> usize { 1 }
 
 fn default_max_cluster_full_scan() -> usize { 100 }
@@ -140,17 +96,6 @@ fn default_bind_host() -> String { "127.0.0.1".into() }
 
 // --- Default trait impls ---
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            index: IndexConfig::default(),
-            weight: WeightConfig::default(),
-            recall: RecallConfig::default(),
-            inspect: InspectConfig::default(),
-            daemon: DaemonConfig::default(),
-        }
-    }
-}
 
 impl Default for IndexConfig {
     fn default() -> Self {
@@ -176,11 +121,8 @@ impl Default for WeightConfig {
 impl Default for RecallConfig {
     fn default() -> Self {
         Self {
-            alpha: default_alpha(),
-            beta: default_beta(),
-            gamma: default_gamma(),
+            vitality_floor: default_vitality_floor(),
             default_depth: default_depth(),
-            proximity_metric: ProximityMetric::default(),
         }
     }
 }
@@ -256,14 +198,12 @@ pub fn try_memcore_dir() -> Option<PathBuf> {
     }
 
     // 3. Binary's own parent directory (self-contained release layout)
-    if let Ok(exe) = std::env::current_exe() {
-        if let Ok(canonical) = exe.canonicalize() {
-            if let Some(parent) = canonical.parent() {
-                if parent.join("memcore.toml").exists() || parent.join("memories").is_dir() {
-                    return Some(parent.to_path_buf());
-                }
-            }
-        }
+    if let Ok(exe) = std::env::current_exe()
+        && let Ok(canonical) = exe.canonicalize()
+        && let Some(parent) = canonical.parent()
+        && (parent.join("memcore.toml").exists() || parent.join("memories").is_dir())
+    {
+        return Some(parent.to_path_buf());
     }
 
     None

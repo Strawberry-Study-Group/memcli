@@ -46,17 +46,17 @@ The CLI auto-starts the daemon on first call. The daemon holds everything in mem
 
 ## Recall: smarter than search
 
-`memcore recall` is not just vector search. It combines three signals:
+`memcore recall` is not just vector search. It combines three signals via multiplicative scoring:
 
 ```
-score = 0.6 × similarity + 0.2 × weight + 0.2 × graph_proximity
+score = similarity × weight × vitality
 ```
 
 - **similarity** — how semantically close your query is to the memory's abstract (via multilingual embedding)
 - **weight** — how useful this memory has been (shaped over time by `boost` / `penalize`)
-- **graph_proximity** — how close this node is to your top matches via linked neighbors
+- **vitality** — time-decay factor based on recency and access frequency (frequently used memories stay vital longer)
 
-Vector search finds seeds. BFS traversal through the knowledge graph pulls in related nodes. Weighted scoring surfaces what's actually important. The result is a ranked list of exactly what your agent needs.
+Vector search finds seed nodes. BFS traversal through the knowledge graph pulls in related neighbors and computes their real similarity. Multiplicative scoring means a memory must be relevant, trusted, *and* vital to rank high. The result is a ranked list of exactly what your agent needs.
 
 ---
 
@@ -242,9 +242,7 @@ penalty_factor = 0.8      # multiplicative decay per negative feedback
 warn_threshold = 0.1      # nodes below this flagged in inspect
 
 [recall]
-alpha = 0.6               # weight for vector similarity in scoring
-beta = 0.2                # weight for node importance (weight field)
-gamma = 0.2               # weight for graph proximity
+vitality_floor = 0.05     # minimum vitality (prevents old nodes from fully dying)
 default_depth = 1         # BFS expansion depth from seed nodes
 
 [daemon]

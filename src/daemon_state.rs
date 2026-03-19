@@ -22,6 +22,8 @@ pub struct DaemonState {
     /// Nodes whose access metadata (last_accessed, access_count) changed
     /// since last flush. Flushed to disk periodically by the daemon.
     pub access_dirty: std::collections::HashSet<String>,
+    /// Whether the vector index has been modified since last save to disk.
+    pub index_dirty: bool,
     #[cfg(feature = "embedding")]
     pub embedding_model: Option<crate::index::EmbeddingModel>,
 }
@@ -121,6 +123,22 @@ pub fn load_state_from_dir(base_dir: &Path) -> anyhow::Result<DaemonState> {
         }
     };
 
+    // Step 5c: Check for dimension mismatch between model and index
+    #[cfg(feature = "embedding")]
+    {
+        if let Some(ref model) = embedding_model {
+            if let Some(index_dims) = vector_index.dimensions() {
+                if index_dims != model.dimensions {
+                    tracing::warn!(
+                        "vector index dimensions ({}) differ from model dimensions ({}) — run `reindex` to rebuild",
+                        index_dims,
+                        model.dimensions
+                    );
+                }
+            }
+        }
+    }
+
     // Step 6: Clear WAL after successful recovery
     let wal = WalWriter::at(wal_path);
     let _ = wal.clear();
@@ -134,6 +152,7 @@ pub fn load_state_from_dir(base_dir: &Path) -> anyhow::Result<DaemonState> {
         config,
         started_at: Utc::now(),
         access_dirty: std::collections::HashSet::new(),
+        index_dirty: false,
         #[cfg(feature = "embedding")]
         embedding_model,
     })
@@ -287,6 +306,26 @@ pub fn save_graph_idx(base_dir: &Path, graph: &Graph) -> std::io::Result<()> {
     let bytes = serialize_graph_idx(graph);
     let path = base_dir.join("graph.idx");
     std::fs::write(path, bytes)
+}
+
+/// Flush the vector index to disk if it has been modified since last save.
+///
+/// Called periodically by the daemon and on shutdown to ensure embeddings
+/// computed during create/update aren't lost on crash.
+pub fn flush_vector_index(state: &mut DaemonState, base_dir: &Path) {
+    if !state.index_dirty {
+        return;
+    }
+    let index_dir = base_dir.join("index");
+    match state.vector_index.save_to_dir(&index_dir) {
+        Ok(()) => {
+            state.index_dirty = false;
+            tracing::debug!("flushed vector index to disk");
+        }
+        Err(e) => {
+            tracing::warn!("failed to flush vector index: {}", e);
+        }
+    }
 }
 
 /// Flush dirty access metadata by rewriting each dirty node's .md file.

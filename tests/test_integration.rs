@@ -43,6 +43,7 @@ fn make_test_state(base_dir: &std::path::Path) -> DaemonState {
         config: Config::default(),
         started_at: chrono::Utc::now(),
         access_dirty: std::collections::HashSet::new(),
+        index_dirty: false,
         #[cfg(feature = "embedding")]
         embedding_model: None,
     }
@@ -806,5 +807,209 @@ async fn test_multiple_sequential_requests() {
             assert_eq!(entries.len(), 5);
         }
         other => panic!("expected NodeList, got {:?}", other),
+    }
+}
+
+// ============================================================
+// Concurrent TCP connection tests (#10 from gap analysis)
+// ============================================================
+
+#[tokio::test]
+async fn test_concurrent_creates() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (port, nonce, _state) = spawn_test_daemon(tmp.path().to_path_buf()).await;
+
+    // Spawn 10 concurrent create requests
+    let mut handles = Vec::new();
+    for i in 0..10 {
+        let nonce = nonce.clone();
+        let handle = tokio::spawn(async move {
+            let name = format!("conc-{:02}", i);
+            let content = make_content(&format!("concurrent {}", i), &[], &format!("body {}", i));
+            let resp = client_roundtrip(
+                port,
+                &nonce,
+                &Request::Create { name, content },
+            )
+            .await
+            .unwrap();
+            assert!(resp.success, "concurrent create {} failed: {:?}", i, resp.body);
+        });
+        handles.push(handle);
+    }
+
+    // Wait for all to complete
+    for h in handles {
+        h.await.unwrap();
+    }
+
+    // Verify all 10 nodes exist
+    let resp = client_roundtrip(
+        port,
+        &nonce,
+        &Request::Ls { sort: protocol::SortField::Name },
+    )
+    .await
+    .unwrap();
+    assert!(resp.success);
+    match &resp.body {
+        ResponseBody::NodeList(entries) => {
+            assert_eq!(entries.len(), 10, "all 10 concurrent creates should succeed");
+        }
+        other => panic!("expected NodeList, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_concurrent_reads_and_writes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (port, nonce, _state) = spawn_test_daemon(tmp.path().to_path_buf()).await;
+
+    // Create a seed node
+    let content = make_content("seed", &[], "seed body");
+    let resp = client_roundtrip(
+        port,
+        &nonce,
+        &Request::Create { name: "seed-node".into(), content },
+    )
+    .await
+    .unwrap();
+    assert!(resp.success);
+
+    // Concurrent: 5 reads + 5 creates simultaneously
+    let mut handles = Vec::new();
+
+    for i in 0..5 {
+        let read_nonce = nonce.clone();
+        // Spawn a reader
+        let read_handle = tokio::spawn(async move {
+            let resp = client_roundtrip(
+                port,
+                &read_nonce,
+                &Request::Get { names: vec!["seed-node".into()] },
+            )
+            .await
+            .unwrap();
+            assert!(resp.success, "concurrent read {} failed", i);
+        });
+        handles.push(read_handle);
+
+        let write_nonce = nonce.clone();
+        // Spawn a writer
+        let write_handle = tokio::spawn(async move {
+            let name = format!("rw-{}", i);
+            let content = make_content(&format!("rw {}", i), &[], &format!("rw body {}", i));
+            let resp = client_roundtrip(
+                port,
+                &write_nonce,
+                &Request::Create { name, content },
+            )
+            .await
+            .unwrap();
+            assert!(resp.success, "concurrent write {} failed", i);
+        });
+        handles.push(write_handle);
+    }
+
+    for h in handles {
+        h.await.unwrap();
+    }
+
+    // Verify: seed-node + 5 new nodes = 6
+    let resp = client_roundtrip(
+        port,
+        &nonce,
+        &Request::Ls { sort: protocol::SortField::Name },
+    )
+    .await
+    .unwrap();
+    match &resp.body {
+        ResponseBody::NodeList(entries) => {
+            assert_eq!(entries.len(), 6, "should have 6 nodes after concurrent r/w");
+        }
+        other => panic!("expected NodeList, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_concurrent_link_and_status() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (port, nonce, _state) = spawn_test_daemon(tmp.path().to_path_buf()).await;
+
+    // Create 4 nodes
+    for name in &["ca", "cb", "cc", "cd"] {
+        let content = make_content(&format!("{} abstract", name), &[], "body");
+        let resp = client_roundtrip(
+            port,
+            &nonce,
+            &Request::Create { name: name.to_string(), content },
+        )
+        .await
+        .unwrap();
+        assert!(resp.success);
+    }
+
+    // Concurrent: link operations + status checks
+    let mut handles = Vec::new();
+
+    let pairs = [("ca", "cb"), ("cc", "cd"), ("ca", "cc")];
+    for (a, b) in pairs {
+        let nonce = nonce.clone();
+        let a = a.to_string();
+        let b = b.to_string();
+        let h = tokio::spawn(async move {
+            let resp = client_roundtrip(
+                port,
+                &nonce,
+                &Request::Link { a, b },
+            )
+            .await
+            .unwrap();
+            assert!(resp.success, "concurrent link failed");
+        });
+        handles.push(h);
+    }
+
+    // Also fire status requests concurrently
+    for _ in 0..3 {
+        let nonce = nonce.clone();
+        let h = tokio::spawn(async move {
+            let resp = client_roundtrip(
+                port,
+                &nonce,
+                &Request::Status,
+            )
+            .await
+            .unwrap();
+            assert!(resp.success);
+        });
+        handles.push(h);
+    }
+
+    for h in handles {
+        h.await.unwrap();
+    }
+
+    // Verify all links exist
+    for (a, _b) in pairs {
+        let resp = client_roundtrip(
+            port,
+            &nonce,
+            &Request::Neighbors {
+                name: a.to_string(),
+                depth: 1,
+                limit: 10,
+                offset: 0,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(resp.success);
+        match &resp.body {
+            ResponseBody::Neighbors { total, .. } => {
+                assert!(*total > 0, "node {} should have neighbors after linking", a);
+            }
+            other => panic!("expected Neighbors for {}, got {:?}", a, other),
+        }
     }
 }

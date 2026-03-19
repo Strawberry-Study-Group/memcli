@@ -1,14 +1,16 @@
 use std::collections::HashMap;
 
-use memcore::config::{ProximityMetric, RecallConfig};
+use chrono::{Duration, Utc};
+
+use memcore::config::RecallConfig;
 use memcore::graph::Graph;
 use memcore::index::VectorIndex;
 use memcore::node::NodeMeta;
-use memcore::recall::{multi_recall, recall};
+use memcore::recall::{multi_recall, recall, vitality};
 
-/// Helper: create a NodeMeta with given weight and abstract
+/// Helper: create a NodeMeta with given weight and abstract.
+/// Uses Utc::now() for timestamps and access_count=0 → vitality=1.0 (born hot).
 fn make_meta(name: &str, weight: f32, abstract_text: &str) -> NodeMeta {
-    use chrono::Utc;
     NodeMeta {
         name: name.to_string(),
         created: Utc::now(),
@@ -23,14 +25,104 @@ fn make_meta(name: &str, weight: f32, abstract_text: &str) -> NodeMeta {
     }
 }
 
+/// Helper: create a NodeMeta with specific access history for vitality testing.
+fn make_meta_with_access(
+    name: &str,
+    weight: f32,
+    abstract_text: &str,
+    last_accessed: chrono::DateTime<Utc>,
+    access_count: u32,
+) -> NodeMeta {
+    NodeMeta {
+        name: name.to_string(),
+        created: Utc::now(),
+        updated: Utc::now(),
+        weight,
+        last_accessed,
+        access_count,
+        pinned: false,
+        links: vec![],
+        abstract_text: abstract_text.to_string(),
+        abstract_hash: 0,
+    }
+}
+
 fn default_config() -> RecallConfig {
     RecallConfig {
-        alpha: 0.6,
-        beta: 0.2,
-        gamma: 0.2,
+        vitality_floor: 0.05,
         default_depth: 1,
-        proximity_metric: ProximityMetric::EdgeDistance,
     }
+}
+
+// ============================================================
+// Vitality function tests
+// ============================================================
+
+#[test]
+fn test_vitality_brand_new_node() {
+    // A node just created (last_accessed = now, access_count = 0) → vitality = 1.0
+    let meta = make_meta("fresh", 1.0, "new node");
+    let now = Utc::now();
+    let v = vitality(&meta, 0.05, now);
+    assert!(
+        (v - 1.0).abs() < 0.01,
+        "brand new node should have vitality ~1.0, got {}",
+        v
+    );
+}
+
+#[test]
+fn test_vitality_one_day_no_access() {
+    // 1 day old, never accessed → effective_age = 1 / (1 + ln(1)) = 1 / 1 = 1
+    // vitality = 1 / (1 + 1) = 0.5
+    let now = Utc::now();
+    let meta = make_meta_with_access("old", 1.0, "test", now - Duration::days(1), 0);
+    let v = vitality(&meta, 0.05, now);
+    assert!(
+        (v - 0.5).abs() < 0.01,
+        "1-day-old unaccessed node should have vitality ~0.5, got {}",
+        v
+    );
+}
+
+#[test]
+fn test_vitality_frequency_slows_decay() {
+    // Same age (1 day), but with access_count=10
+    // effective_age = 1 / (1 + ln(11)) ≈ 1 / (1 + 2.397) ≈ 0.294
+    // vitality = 1 / (1 + 0.294) ≈ 0.773
+    let now = Utc::now();
+    let meta_no_access = make_meta_with_access("no-access", 1.0, "test", now - Duration::days(1), 0);
+    let meta_frequent = make_meta_with_access("frequent", 1.0, "test", now - Duration::days(1), 10);
+
+    let v_no = vitality(&meta_no_access, 0.05, now);
+    let v_freq = vitality(&meta_frequent, 0.05, now);
+
+    assert!(
+        v_freq > v_no,
+        "frequently accessed node should have higher vitality: freq={}, no_access={}",
+        v_freq,
+        v_no
+    );
+}
+
+#[test]
+fn test_vitality_floor_clamp() {
+    // Very old node (365 days, no access) should not go below floor
+    let now = Utc::now();
+    let meta = make_meta_with_access("ancient", 1.0, "test", now - Duration::days(365), 0);
+    let floor = 0.05;
+    let v = vitality(&meta, floor, now);
+    assert!(
+        v >= floor,
+        "vitality {} should be >= floor {}",
+        v,
+        floor
+    );
+    assert!(
+        (v - floor).abs() < 0.01,
+        "very old node should be near floor: got {}",
+        v
+    );
 }
 
 // ============================================================
@@ -52,7 +144,7 @@ fn test_recall_empty_index() {
 #[test]
 fn test_recall_single_node_exact_match() {
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0, 0.0, 0.0]);
+    idx.insert("node-a", &[1.0, 0.0, 0.0]).unwrap();
 
     let graph = Graph::new();
     let mut metas = HashMap::new();
@@ -69,44 +161,115 @@ fn test_recall_single_node_exact_match() {
 }
 
 #[test]
-fn test_recall_scoring_formula() {
-    // score = alpha * similarity + beta * weight + gamma * graph_proximity
-    // For a seed node: similarity from search, weight from meta, graph_proximity = 0
+fn test_recall_multiplicative_scoring_formula() {
+    // score = similarity × weight × vitality
+    // For a brand-new seed node: sim=1.0, weight=0.5, vitality≈1.0
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0, 0.0]);
+    idx.insert("node-a", &[1.0, 0.0]).unwrap();
 
     let graph = Graph::new();
     let mut metas = HashMap::new();
     metas.insert("node-a".to_string(), make_meta("node-a", 0.5, "abstract"));
 
     let query = vec![1.0, 0.0];
-    let config = RecallConfig {
-        alpha: 0.6,
-        beta: 0.2,
-        gamma: 0.2,
-        default_depth: 1,
-        proximity_metric: ProximityMetric::EdgeDistance,
-    };
+    let config = default_config();
 
     let results = recall(&idx, &graph, &metas, &query, &config, 5, 1);
     assert_eq!(results.len(), 1);
 
-    // similarity = 1.0 (exact match), weight = 0.5, graph_proximity = 0.0 (seed)
-    let expected_score = 0.6 * 1.0 + 0.2 * 0.5 + 0.2 * 0.0;
+    // similarity = 1.0, weight = 0.5, vitality ≈ 1.0 → score ≈ 0.5
+    let expected_score = 1.0 * 0.5 * 1.0;
     assert!(
-        (results[0].score - expected_score).abs() < 1e-5,
-        "expected {}, got {}",
+        (results[0].score - expected_score).abs() < 0.05,
+        "expected ~{}, got {}",
         expected_score,
         results[0].score
     );
 }
 
 #[test]
-fn test_recall_with_graph_expansion() {
-    // node-a is in the vector index, node-b is only reachable via graph
+fn test_recall_multiplicative_zero_weight_kills_score() {
+    // weight=0 should make score=0 regardless of similarity or vitality
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0, 0.0]);
-    // node-b is NOT in the vector index but is a graph neighbor
+    idx.insert("zero-weight", &[1.0, 0.0]).unwrap();
+
+    let graph = Graph::new();
+    let mut metas = HashMap::new();
+    metas.insert("zero-weight".to_string(), make_meta("zero-weight", 0.0, "abstract"));
+
+    let query = vec![1.0, 0.0];
+    let config = default_config();
+
+    let results = recall(&idx, &graph, &metas, &query, &config, 5, 1);
+    assert_eq!(results.len(), 1);
+    assert!(
+        results[0].score.abs() < 1e-6,
+        "zero weight should kill score, got {}",
+        results[0].score
+    );
+}
+
+#[test]
+fn test_recall_graph_neighbor_gets_real_similarity() {
+    // node-a is a seed, node-b is a graph neighbor WITH an embedding
+    // node-b should get real cosine similarity, not 0
+    let mut idx = VectorIndex::new();
+    idx.insert("node-a", &[1.0, 0.0]).unwrap();
+    idx.insert("node-b", &[0.8, 0.6]).unwrap(); // has embedding
+
+    let mut graph = Graph::new();
+    graph.add_edge("node-a", "node-b");
+
+    let mut metas = HashMap::new();
+    metas.insert("node-a".to_string(), make_meta("node-a", 1.0, "a"));
+    metas.insert("node-b".to_string(), make_meta("node-b", 1.0, "b"));
+
+    let query = vec![1.0, 0.0];
+    let config = default_config();
+
+    let results = recall(&idx, &graph, &metas, &query, &config, 5, 1);
+    let b_result = results.iter().find(|r| r.node_name == "node-b").unwrap();
+
+    // node-b embedding [0.8, 0.6] vs query [1.0, 0.0] → cosine = 0.8
+    assert!(
+        b_result.similarity > 0.7,
+        "graph neighbor should get real similarity, got {}",
+        b_result.similarity
+    );
+}
+
+#[test]
+fn test_recall_graph_neighbor_without_embedding_skipped() {
+    // node-b is a graph neighbor but has NO embedding → should be skipped
+    let mut idx = VectorIndex::new();
+    idx.insert("node-a", &[1.0, 0.0]).unwrap();
+    // node-b is NOT in the vector index
+
+    let mut graph = Graph::new();
+    graph.add_edge("node-a", "node-b");
+
+    let mut metas = HashMap::new();
+    metas.insert("node-a".to_string(), make_meta("node-a", 1.0, "a"));
+    metas.insert("node-b".to_string(), make_meta("node-b", 1.0, "b"));
+
+    let query = vec![1.0, 0.0];
+    let config = default_config();
+
+    let results = recall(&idx, &graph, &metas, &query, &config, 5, 1);
+
+    // node-b should NOT appear — no embedding means no similarity
+    let names: Vec<&str> = results.iter().map(|r| r.node_name.as_str()).collect();
+    assert!(!names.contains(&"node-b"), "graph neighbor without embedding should be skipped");
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].node_name, "node-a");
+}
+
+#[test]
+fn test_recall_with_graph_expansion() {
+    // node-a is in the vector index, node-b is reachable via graph AND has embedding
+    let mut idx = VectorIndex::new();
+    idx.insert("node-a", &[1.0, 0.0]).unwrap();
+    idx.insert("node-b", &[0.7, 0.7]).unwrap(); // has embedding for real similarity
 
     let mut graph = Graph::new();
     graph.add_edge("node-a", "node-b");
@@ -120,23 +283,27 @@ fn test_recall_with_graph_expansion() {
 
     let results = recall(&idx, &graph, &metas, &query, &config, 5, 1);
 
-    // Both nodes should appear: node-a from vector search, node-b from graph expansion
+    // Both nodes should appear
     assert_eq!(results.len(), 2);
-
     let names: Vec<&str> = results.iter().map(|r| r.node_name.as_str()).collect();
     assert!(names.contains(&"node-a"));
     assert!(names.contains(&"node-b"));
 
-    // node-a should score higher (has similarity, node-b has only weight+graph_proximity)
+    // node-a should score higher (exact match sim=1.0 vs node-b lower sim)
     assert!(results[0].score > results[1].score);
 }
 
 #[test]
 fn test_recall_graph_expansion_depth() {
     // Chain: a -- b -- c
-    // depth=1 should only reach b from a, not c
+    // All have embeddings. With large top_k, all are vector seeds.
+    // But with top_k=1, only node-a (highest sim to query) is a seed.
+    // BFS at depth=1 from node-a → finds node-b.
+    // BFS at depth=2 from node-a → finds node-b and node-c.
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0, 0.0]);
+    idx.insert("node-a", &[1.0, 0.0]).unwrap();
+    idx.insert("node-b", &[0.5, 0.866]).unwrap(); // ~60° from query, sim ≈ 0.5
+    idx.insert("node-c", &[0.3, 0.954]).unwrap(); // ~72° from query, sim ≈ 0.3
 
     let mut graph = Graph::new();
     graph.add_edge("node-a", "node-b");
@@ -150,16 +317,19 @@ fn test_recall_graph_expansion_depth() {
     let query = vec![1.0, 0.0];
     let config = default_config();
 
-    // depth=1: only node-a and node-b
-    let results = recall(&idx, &graph, &metas, &query, &config, 5, 1);
-    let names: Vec<&str> = results.iter().map(|r| r.node_name.as_str()).collect();
-    assert!(names.contains(&"node-a"));
-    assert!(names.contains(&"node-b"));
-    assert!(!names.contains(&"node-c"));
+    // top_k=1: only node-a is a seed. depth=1 → node-b added via BFS.
+    // Final output truncated to top_k=1 → only node-a returned.
+    let results_d1 = recall(&idx, &graph, &metas, &query, &config, 1, 1);
+    assert_eq!(results_d1.len(), 1);
+    assert_eq!(results_d1[0].node_name, "node-a");
 
-    // depth=2: all three
-    let results = recall(&idx, &graph, &metas, &query, &config, 5, 2);
-    let names: Vec<&str> = results.iter().map(|r| r.node_name.as_str()).collect();
+    // top_k=3 + depth=0: all 3 from vector search (no graph expansion needed)
+    let results_d0 = recall(&idx, &graph, &metas, &query, &config, 3, 0);
+    assert_eq!(results_d0.len(), 3);
+
+    // Verify that depth=2 with large top_k finds all nodes
+    let results_d2 = recall(&idx, &graph, &metas, &query, &config, 10, 2);
+    let names: Vec<&str> = results_d2.iter().map(|r| r.node_name.as_str()).collect();
     assert!(names.contains(&"node-a"));
     assert!(names.contains(&"node-b"));
     assert!(names.contains(&"node-c"));
@@ -192,8 +362,8 @@ fn test_recall_deduplication() {
     // node-b is both a vector search result AND a graph neighbor of node-a
     // It should appear only once
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0, 0.0]);
-    idx.insert("node-b", &[0.9, 0.1]);
+    idx.insert("node-a", &[1.0, 0.0]).unwrap();
+    idx.insert("node-b", &[0.9, 0.1]).unwrap();
 
     let mut graph = Graph::new();
     graph.add_edge("node-a", "node-b");
@@ -206,7 +376,6 @@ fn test_recall_deduplication() {
     let config = default_config();
 
     let results = recall(&idx, &graph, &metas, &query, &config, 5, 1);
-    // Each node should appear exactly once
     let names: Vec<&str> = results.iter().map(|r| r.node_name.as_str()).collect();
     assert_eq!(names.len(), 2);
     assert!(names.contains(&"node-a"));
@@ -215,14 +384,12 @@ fn test_recall_deduplication() {
 
 #[test]
 fn test_recall_missing_meta_skipped() {
-    // node-b is in vector index but has no meta entry — should be skipped
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0, 0.0]);
-    idx.insert("node-b", &[0.9, 0.1]);
+    idx.insert("node-a", &[1.0, 0.0]).unwrap();
+    idx.insert("node-b", &[0.9, 0.1]).unwrap();
 
     let graph = Graph::new();
     let mut metas = HashMap::new();
-    // Only node-a has metadata
     metas.insert("node-a".to_string(), make_meta("node-a", 1.0, "a"));
 
     let query = vec![1.0, 0.0];
@@ -236,9 +403,9 @@ fn test_recall_missing_meta_skipped() {
 #[test]
 fn test_recall_sorted_by_score_descending() {
     let mut idx = VectorIndex::new();
-    idx.insert("high-sim", &[1.0, 0.0]);
-    idx.insert("mid-sim", &[0.7, 0.7]);
-    idx.insert("low-sim", &[0.0, 1.0]);
+    idx.insert("high-sim", &[1.0, 0.0]).unwrap();
+    idx.insert("mid-sim", &[0.7, 0.7]).unwrap();
+    idx.insert("low-sim", &[0.0, 1.0]).unwrap();
 
     let graph = Graph::new();
     let mut metas = HashMap::new();
@@ -264,8 +431,8 @@ fn test_recall_sorted_by_score_descending() {
 fn test_recall_weight_affects_ranking() {
     // Two nodes with equal similarity but different weights
     let mut idx = VectorIndex::new();
-    idx.insert("heavy", &[1.0, 0.0]);
-    idx.insert("light", &[1.0, 0.0]); // same embedding
+    idx.insert("heavy", &[1.0, 0.0]).unwrap();
+    idx.insert("light", &[1.0, 0.0]).unwrap(); // same embedding
 
     let graph = Graph::new();
     let mut metas = HashMap::new();
@@ -273,13 +440,7 @@ fn test_recall_weight_affects_ranking() {
     metas.insert("light".to_string(), make_meta("light", 0.1, "b"));
 
     let query = vec![1.0, 0.0];
-    let config = RecallConfig {
-        alpha: 0.0, // ignore similarity
-        beta: 1.0,  // only weight matters
-        gamma: 0.0,
-        default_depth: 0,
-        proximity_metric: ProximityMetric::EdgeDistance,
-    };
+    let config = default_config();
 
     let results = recall(&idx, &graph, &metas, &query, &config, 2, 0);
     assert_eq!(results[0].node_name, "heavy");
@@ -289,7 +450,7 @@ fn test_recall_weight_affects_ranking() {
 #[test]
 fn test_recall_result_fields() {
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0, 0.0]);
+    idx.insert("node-a", &[1.0, 0.0]).unwrap();
 
     let graph = Graph::new();
     let mut metas = HashMap::new();
@@ -306,12 +467,15 @@ fn test_recall_result_fields() {
     assert_eq!(results[0].weight, 0.75);
     assert_eq!(results[0].abstract_text, "my abstract text");
     assert!((results[0].similarity - 1.0).abs() < 1e-6);
+    // Brand new node → vitality ≈ 1.0
+    assert!(results[0].vitality > 0.99);
 }
 
 #[test]
 fn test_recall_depth_zero_no_graph_expansion() {
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0, 0.0]);
+    idx.insert("node-a", &[1.0, 0.0]).unwrap();
+    idx.insert("node-b", &[0.5, 0.5]).unwrap();
 
     let mut graph = Graph::new();
     graph.add_edge("node-a", "node-b");
@@ -323,90 +487,10 @@ fn test_recall_depth_zero_no_graph_expansion() {
     let query = vec![1.0, 0.0];
     let config = default_config();
 
-    // depth=0 means no graph expansion
-    let results = recall(&idx, &graph, &metas, &query, &config, 5, 0);
+    // depth=0 means no graph expansion — only vector search seeds
+    let results = recall(&idx, &graph, &metas, &query, &config, 1, 0);
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].node_name, "node-a");
-}
-
-// ============================================================
-// ProximityMetric unit tests
-// ============================================================
-
-#[test]
-fn test_proximity_edge_distance_seed_is_zero() {
-    let m = ProximityMetric::EdgeDistance;
-    assert_eq!(m.compute(0), 0.0);
-}
-
-#[test]
-fn test_proximity_edge_distance_values() {
-    let m = ProximityMetric::EdgeDistance;
-    assert!((m.compute(1) - 0.5).abs() < 1e-6);       // 1/(1+1)
-    assert!((m.compute(2) - 1.0 / 3.0).abs() < 1e-6); // 1/(1+2)
-    assert!((m.compute(3) - 0.25).abs() < 1e-6);       // 1/(1+3)
-}
-
-#[test]
-fn test_proximity_edge_distance_squared_values() {
-    let m = ProximityMetric::EdgeDistanceSquared;
-    assert_eq!(m.compute(0), 0.0);
-    assert!((m.compute(1) - 0.25).abs() < 1e-6);        // 1/(2^2)
-    assert!((m.compute(2) - 1.0 / 9.0).abs() < 1e-6);   // 1/(3^2)
-}
-
-#[test]
-fn test_recall_with_squared_proximity_favours_direct_neighbours() {
-    // Chain: a -- b -- c, search hits a.
-    // With EdgeDistanceSquared, b (hops=1) should get much more proximity
-    // than with EdgeDistance, relative to c (hops=2).
-    let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0, 0.0]);
-
-    let mut graph = Graph::new();
-    graph.add_edge("node-a", "node-b");
-    graph.add_edge("node-b", "node-c");
-
-    let mut metas = HashMap::new();
-    metas.insert("node-a".to_string(), make_meta("node-a", 0.5, "a"));
-    metas.insert("node-b".to_string(), make_meta("node-b", 0.5, "b"));
-    metas.insert("node-c".to_string(), make_meta("node-c", 0.5, "c"));
-
-    let config_linear = RecallConfig {
-        alpha: 0.0,
-        beta: 0.0,
-        gamma: 1.0, // only proximity matters
-        default_depth: 2,
-        proximity_metric: ProximityMetric::EdgeDistance,
-    };
-    let config_squared = RecallConfig {
-        alpha: 0.0,
-        beta: 0.0,
-        gamma: 1.0,
-        default_depth: 2,
-        proximity_metric: ProximityMetric::EdgeDistanceSquared,
-    };
-
-    let query = vec![1.0, 0.0];
-
-    let linear = recall(&idx, &graph, &metas, &query, &config_linear, 5, 2);
-    let squared = recall(&idx, &graph, &metas, &query, &config_squared, 5, 2);
-
-    // Both should return b and c (a is seed with proximity=0)
-    let b_linear = linear.iter().find(|r| r.node_name == "node-b").unwrap().score;
-    let c_linear = linear.iter().find(|r| r.node_name == "node-c").unwrap().score;
-    let b_squared = squared.iter().find(|r| r.node_name == "node-b").unwrap().score;
-    let c_squared = squared.iter().find(|r| r.node_name == "node-c").unwrap().score;
-
-    // Squared metric should have a larger gap between b and c
-    let ratio_linear = b_linear / c_linear;
-    let ratio_squared = b_squared / c_squared;
-    assert!(
-        ratio_squared > ratio_linear,
-        "squared should favour direct neighbours more: linear ratio={}, squared ratio={}",
-        ratio_linear,
-        ratio_squared
-    );
 }
 
 // ============================================================
@@ -428,8 +512,8 @@ fn test_multi_recall_empty_queries() {
 #[test]
 fn test_multi_recall_single_query_matches_recall() {
     let mut idx = VectorIndex::new();
-    idx.insert("node-a", &[1.0, 0.0]);
-    idx.insert("node-b", &[0.5, 0.5]);
+    idx.insert("node-a", &[1.0, 0.0]).unwrap();
+    idx.insert("node-b", &[0.5, 0.5]).unwrap();
 
     let graph = Graph::new();
     let mut metas = HashMap::new();
@@ -439,8 +523,8 @@ fn test_multi_recall_single_query_matches_recall() {
     let query = vec![1.0, 0.0];
     let config = default_config();
 
-    let single = recall(&idx, &graph, &metas, &query, &config, 5, 1);
-    let multi = multi_recall(&idx, &graph, &metas, &[query], &config, 5, 1);
+    let single = recall(&idx, &graph, &metas, &query, &config, 5, 0);
+    let multi = multi_recall(&idx, &graph, &metas, &[query], &config, 5, 0);
 
     assert_eq!(single.len(), multi.len());
     for (s, m) in single.iter().zip(multi.iter()) {
@@ -452,12 +536,10 @@ fn test_multi_recall_single_query_matches_recall() {
 #[test]
 fn test_multi_recall_two_queries_wider_net() {
     let mut idx = VectorIndex::new();
-    // Cluster A: close to [1, 0]
-    idx.insert("a1", &[1.0, 0.0]);
-    idx.insert("a2", &[0.9, 0.1]);
-    // Cluster B: close to [0, 1]
-    idx.insert("b1", &[0.0, 1.0]);
-    idx.insert("b2", &[0.1, 0.9]);
+    idx.insert("a1", &[1.0, 0.0]).unwrap();
+    idx.insert("a2", &[0.9, 0.1]).unwrap();
+    idx.insert("b1", &[0.0, 1.0]).unwrap();
+    idx.insert("b2", &[0.1, 0.9]).unwrap();
 
     let graph = Graph::new();
     let mut metas = HashMap::new();
@@ -473,7 +555,6 @@ fn test_multi_recall_two_queries_wider_net() {
     let results = multi_recall(&idx, &graph, &metas, &[q1, q2], &config, 2, 0);
     let names: Vec<&str> = results.iter().map(|r| r.node_name.as_str()).collect();
 
-    // Should get nodes from both clusters
     assert!(names.contains(&"a1"));
     assert!(names.contains(&"b1"));
     assert!(results.len() >= 3);
@@ -482,9 +563,9 @@ fn test_multi_recall_two_queries_wider_net() {
 #[test]
 fn test_multi_recall_shared_node_max_similarity() {
     let mut idx = VectorIndex::new();
-    idx.insert("shared", &[0.7, 0.7]);
-    idx.insert("only-a", &[1.0, 0.0]);
-    idx.insert("only-b", &[0.0, 1.0]);
+    idx.insert("shared", &[0.7, 0.7]).unwrap();
+    idx.insert("only-a", &[1.0, 0.0]).unwrap();
+    idx.insert("only-b", &[0.0, 1.0]).unwrap();
 
     let graph = Graph::new();
     let mut metas = HashMap::new();
@@ -494,13 +575,7 @@ fn test_multi_recall_shared_node_max_similarity() {
 
     let q1 = vec![1.0, 0.0];
     let q2 = vec![0.0, 1.0];
-    let config = RecallConfig {
-        alpha: 1.0,
-        beta: 0.0,
-        gamma: 0.0,
-        default_depth: 0,
-        proximity_metric: ProximityMetric::EdgeDistance,
-    };
+    let config = default_config();
 
     let results = multi_recall(&idx, &graph, &metas, &[q1, q2], &config, 3, 0);
 
@@ -512,11 +587,11 @@ fn test_multi_recall_shared_node_max_similarity() {
 #[test]
 fn test_multi_recall_graph_expansion_across_seeds() {
     // q1 hits seed-a, q2 hits seed-b
-    // seed-a is linked to graph-neighbor
-    // graph-neighbor should appear in results
+    // seed-a is linked to graph-neighbor (which has an embedding)
     let mut idx = VectorIndex::new();
-    idx.insert("seed-a", &[1.0, 0.0]);
-    idx.insert("seed-b", &[0.0, 1.0]);
+    idx.insert("seed-a", &[1.0, 0.0]).unwrap();
+    idx.insert("seed-b", &[0.0, 1.0]).unwrap();
+    idx.insert("graph-neighbor", &[0.9, 0.1]).unwrap(); // has embedding
 
     let mut graph = Graph::new();
     graph.add_edge("seed-a", "graph-neighbor");
@@ -544,12 +619,12 @@ fn test_multi_recall_graph_expansion_across_seeds() {
 #[test]
 fn test_multi_recall_per_term_top_k() {
     let mut idx = VectorIndex::new();
-    idx.insert("a1", &[1.0, 0.0]);
-    idx.insert("a2", &[0.95, 0.05]);
-    idx.insert("a3", &[0.9, 0.1]);
-    idx.insert("b1", &[0.0, 1.0]);
-    idx.insert("b2", &[0.05, 0.95]);
-    idx.insert("b3", &[0.1, 0.9]);
+    idx.insert("a1", &[1.0, 0.0]).unwrap();
+    idx.insert("a2", &[0.95, 0.05]).unwrap();
+    idx.insert("a3", &[0.9, 0.1]).unwrap();
+    idx.insert("b1", &[0.0, 1.0]).unwrap();
+    idx.insert("b2", &[0.05, 0.95]).unwrap();
+    idx.insert("b3", &[0.1, 0.9]).unwrap();
 
     let graph = Graph::new();
     let mut metas = HashMap::new();
@@ -561,7 +636,6 @@ fn test_multi_recall_per_term_top_k() {
     let q2 = vec![0.0, 1.0];
     let config = default_config();
 
-    // top_k=2 per term, merged result can exceed 2
     let results = multi_recall(&idx, &graph, &metas, &[q1, q2], &config, 2, 0);
     assert!(
         results.len() >= 3,
@@ -573,9 +647,9 @@ fn test_multi_recall_per_term_top_k() {
 #[test]
 fn test_multi_recall_sorted_by_score_descending() {
     let mut idx = VectorIndex::new();
-    idx.insert("a", &[1.0, 0.0]);
-    idx.insert("b", &[0.7, 0.7]);
-    idx.insert("c", &[0.0, 1.0]);
+    idx.insert("a", &[1.0, 0.0]).unwrap();
+    idx.insert("b", &[0.7, 0.7]).unwrap();
+    idx.insert("c", &[0.0, 1.0]).unwrap();
 
     let graph = Graph::new();
     let mut metas = HashMap::new();

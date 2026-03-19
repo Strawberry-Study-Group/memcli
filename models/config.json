@@ -1,5 +1,7 @@
 {
   "name": "multilingual-e5-base",
   "dimensions": 768,
-  "max_tokens": 512
+  "max_tokens": 512,
+  "query_prefix": "query: ",
+  "passage_prefix": "passage: "
 }

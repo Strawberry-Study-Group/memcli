@@ -265,13 +265,13 @@ fn process_alive(pid: u32) -> bool {
 /// Connect to existing daemon, or start a new one
 async fn connect_or_start_daemon() -> anyhow::Result<DaemonConnection> {
     // Try connecting to existing daemon
-    if let Some(info) = read_pid_file() {
-        if process_alive(info.pid) {
-            match DaemonConnection::connect(info.port, &info.nonce).await {
-                Ok(conn) => return Ok(conn),
-                Err(_) => {
-                    // Stale pid file or connection refused, fall through to start new daemon
-                }
+    if let Some(info) = read_pid_file()
+        && process_alive(info.pid)
+    {
+        match DaemonConnection::connect(info.port, &info.nonce).await {
+            Ok(conn) => return Ok(conn),
+            Err(_) => {
+                // Stale pid file or connection refused, fall through to start new daemon
             }
         }
     }
@@ -289,13 +289,13 @@ async fn connect_or_start_daemon() -> anyhow::Result<DaemonConnection> {
             anyhow::bail!("daemon failed to start within 10 seconds");
         }
 
-        if let Some(info) = read_pid_file() {
-            if process_alive(info.pid) {
-                match DaemonConnection::connect(info.port, &info.nonce).await {
-                    Ok(conn) => return Ok(conn),
-                    Err(_) => {
-                        // Not ready yet, keep waiting
-                    }
+        if let Some(info) = read_pid_file()
+            && process_alive(info.pid)
+        {
+            match DaemonConnection::connect(info.port, &info.nonce).await {
+                Ok(conn) => return Ok(conn),
+                Err(_) => {
+                    // Not ready yet, keep waiting
                 }
             }
         }
@@ -329,7 +329,7 @@ async fn start_daemon() -> anyhow::Result<()> {
 async fn init(dir: Option<String>) -> anyhow::Result<()> {
     let base = dir
         .map(PathBuf::from)
-        .unwrap_or_else(|| config::memcore_dir());
+        .unwrap_or_else(config::memcore_dir);
 
     std::fs::create_dir_all(base.join("memories"))?;
     std::fs::create_dir_all(base.join("index"))?;
@@ -380,15 +380,14 @@ fn format_response(response: &Response, quiet: bool) {
             }
             // Calculate column widths, capped for readability
             let max_name = entries.iter().map(|e| e.name.len()).max().unwrap_or(4);
-            let name_width = max_name.max(4).min(NAME_DISPLAY_CAP);
+            let name_width = max_name.clamp(4, NAME_DISPLAY_CAP);
 
             println!(
-                "{:<width$}  {:>6}  {:>5}  {:>3}  {}",
+                "{:<width$}  {:>6}  {:>5}  {:>3}  ACCESSED",
                 "NAME",
                 "WEIGHT",
                 "EDGES",
                 "PIN",
-                "ACCESSED",
                 width = name_width
             );
             for entry in entries {
@@ -412,14 +411,15 @@ fn format_response(response: &Response, quiet: bool) {
                 return;
             }
             let max_name = results.iter().map(|r| r.node_name.len()).max().unwrap_or(4);
-            let name_width = max_name.max(4).min(NAME_DISPLAY_CAP);
+            let name_width = max_name.clamp(4, NAME_DISPLAY_CAP);
             for result in results {
                 let display_name = truncate_name(&result.node_name, NAME_DISPLAY_CAP);
                 println!(
-                    "{:.4}  {:<width$}  w={:.2}  {}",
+                    "{:.4}  {:<width$}  w={:.2} v={:.2}  {}",
                     result.score,
                     display_name,
                     result.weight,
+                    result.vitality,
                     truncate_str(&result.abstract_text, 60),
                     width = name_width
                 );
@@ -446,7 +446,7 @@ fn format_response(response: &Response, quiet: bool) {
                 return;
             }
             let max_name = entries.iter().map(|e| e.name.len()).max().unwrap_or(4);
-            let name_width = max_name.max(4).min(NAME_DISPLAY_CAP);
+            let name_width = max_name.clamp(4, NAME_DISPLAY_CAP);
             println!("depth={}, showing {}/{}", depth, entries.len(), total);
             for entry in entries {
                 let display_name = truncate_name(&entry.name, NAME_DISPLAY_CAP);

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod client;
 mod config;
 mod daemon;

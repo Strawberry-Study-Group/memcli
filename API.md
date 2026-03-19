@@ -488,8 +488,8 @@ Requires `--features embedding`. Computes query embedding, searches HNSW index, 
 
 **Output:**
 ```
-0.8234  project-alpha                 w=0.85  Memory about project alpha...
-0.7956  related-topic                 w=0.92  Another relevant memory...
+0.8234  project-alpha                 w=0.85 v=1.00  Memory about project alpha...
+0.7956  related-topic                 w=0.92 v=0.87  Another relevant memory...
 ```
 
 Columns: score (4 dec), name (30 chars), weight (2 dec), abstract (60 chars).
@@ -530,18 +530,19 @@ Requires `--features embedding`.
 1. Compute query embedding
 2. Vector search for `top_k` seed nodes
 3. BFS expansion from seeds to `depth`
-4. Score candidates: `score = alpha*similarity + beta*weight + gamma*proximity`
-5. Deduplicate, sort descending, return `top_k`
+4. Graph neighbors get real similarity via stored embeddings (no embedding → skipped)
+5. Score candidates: `score = similarity × weight × vitality`
+6. Deduplicate, sort descending, return `top_k`
 
 **Scoring formula:**
 
 ```
-score = 0.6 * similarity + 0.2 * weight + 0.2 * graph_proximity
+score = similarity × weight × vitality
 ```
 
-Proximity for node at `hops` distance from a seed (default `edge_distance` metric):
-- hops=0 (seed itself): proximity = 0.0 (uses similarity score instead)
-- hops=N (N>0): proximity = 1/(1+N)
+- **similarity**: cosine similarity between query and node embedding
+- **weight**: node trust signal (0.0–1.0), adjusted by boost/penalize
+- **vitality**: time decay factor — new nodes start at 1.0, decay with age, frequent access slows decay. Floor set by `vitality_floor` config (default 0.05)
 
 ```
 memcore recall "how to handle errors in Rust"
@@ -607,9 +608,8 @@ Requires `--features embedding`. For each query term:
 2. BFS expand from seeds to `depth`
 
 Merge across all queries:
-- **Max similarity** per unique node
-- **Min graph distance** per unique node
-- Score: `alpha*max_sim + beta*weight + gamma*proximity(min_dist)`
+- **Max similarity** per unique node (graph neighbors get real similarity via embeddings)
+- Score: `similarity × weight × vitality`
 - Sort descending, return all merged results (no global cap)
 
 **Example:**
@@ -859,11 +859,8 @@ penalty_factor = 0.8        # Multiplicative decay per negative feedback
 warn_threshold = 0.1        # Nodes below this weight appear in inspect "low weight"
 
 [recall]
-alpha = 0.6                 # Weight for vector similarity in scoring
-beta = 0.2                  # Weight for node importance (weight field)
-gamma = 0.2                 # Weight for graph proximity
+vitality_floor = 0.05       # Minimum vitality (prevents old nodes from fully dying)
 default_depth = 1           # Default BFS expansion depth
-proximity_metric = "edge_distance"  # or "edge_distance_squared"
 
 [index]
 engine = "usearch"          # Vector search engine

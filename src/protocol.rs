@@ -202,6 +202,8 @@ pub struct SearchResultEntry {
     pub score: f32,
     pub similarity: f32,
     pub weight: f32,
+    #[serde(default)]
+    pub vitality: f32,
     pub abstract_text: String,
 }
 
