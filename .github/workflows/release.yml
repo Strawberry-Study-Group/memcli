@@ -32,6 +32,19 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install ONNX Runtime
+        shell: bash
+        run: |
+          pip install onnxruntime
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            ORT_PATH=$(python3 -c "import onnxruntime, os; print(os.path.join(os.path.dirname(onnxruntime.__file__), 'capi', 'onnxruntime.dll'))")
+          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+            ORT_PATH=$(python3 -c "import onnxruntime, os; print(os.path.join(os.path.dirname(onnxruntime.__file__), 'capi', 'libonnxruntime.dylib'))")
+          else
+            ORT_PATH=$(python3 -c "import onnxruntime, os; print(os.path.join(os.path.dirname(onnxruntime.__file__), 'capi', 'libonnxruntime.so'))")
+          fi
+          echo "ORT_DYLIB_PATH=$ORT_PATH" >> $GITHUB_ENV
+
       - name: Build
         run: cargo build --release --features embedding --target ${{ matrix.target }}
 
@@ -52,6 +65,17 @@ jobs:
           # Bundle model files if present
           if [ -d models ]; then
             cp -r models staging/
+          fi
+
+          # Bundle ONNX Runtime shared library for load-dynamic
+          ORT_DIR=$(python3 -c "import onnxruntime, os; print(os.path.join(os.path.dirname(onnxruntime.__file__), 'capi'))")
+          mkdir -p staging/lib
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp "$ORT_DIR"/onnxruntime*.dll staging/lib/ 2>/dev/null || true
+          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+            cp "$ORT_DIR"/libonnxruntime*.dylib staging/lib/ 2>/dev/null || true
+          else
+            cp "$ORT_DIR"/libonnxruntime*.so* staging/lib/ 2>/dev/null || true
           fi
 
           # Bundle skill docs

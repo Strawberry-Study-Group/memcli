@@ -531,18 +531,17 @@ Requires `--features embedding`.
 2. Vector search for `top_k` seed nodes
 3. BFS expansion from seeds to `depth`
 4. Graph neighbors get real similarity via stored embeddings (no embedding → skipped)
-5. Score candidates: `score = similarity × weight × vitality`
+5. Score candidates: `score = similarity × weight`
 6. Deduplicate, sort descending, return `top_k`
 
 **Scoring formula:**
 
 ```
-score = similarity × weight × vitality
+score = similarity × weight
 ```
 
 - **similarity**: cosine similarity between query and node embedding
 - **weight**: node trust signal (0.0–1.0), adjusted by boost/penalize
-- **vitality**: time decay factor — new nodes start at 1.0, decay with age, frequent access slows decay. Floor set by `vitality_floor` config (default 0.05)
 
 ```
 memcore recall "how to handle errors in Rust"
@@ -609,7 +608,7 @@ Requires `--features embedding`. For each query term:
 
 Merge across all queries:
 - **Max similarity** per unique node (graph neighbors get real similarity via embeddings)
-- Score: `similarity × weight × vitality`
+- Score: `similarity × weight`
 - Sort descending, return all merged results (no global cap)
 
 **Example:**
@@ -859,7 +858,6 @@ penalty_factor = 0.8        # Multiplicative decay per negative feedback
 warn_threshold = 0.1        # Nodes below this weight appear in inspect "low weight"
 
 [recall]
-vitality_floor = 0.05       # Minimum vitality (prevents old nodes from fully dying)
 default_depth = 1           # Default BFS expansion depth
 
 [index]
@@ -889,14 +887,14 @@ Seed nodes (hops=0) always get proximity=0.0 since their contribution comes from
 
 ## Embedding model
 
-Default: `intfloat/multilingual-e5-small` (int8 ONNX quantized)
+Default: `BAAI/bge-small-en-v1.5` (int8 ONNX quantized)
 
 | Property | Value |
 |----------|-------|
 | Dimensions | 384 |
 | Max tokens | 512 |
-| Languages | 100+ |
-| ONNX size | ~118MB |
+| Languages | English |
+| ONNX size | ~32MB |
 
 Model files in `models/`:
 - `model_quantized.onnx` — ONNX model

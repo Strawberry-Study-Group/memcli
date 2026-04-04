@@ -40,8 +40,6 @@ pub struct WeightConfig {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RecallConfig {
-    #[serde(default = "default_vitality_floor")]
-    pub vitality_floor: f32,
     #[serde(default = "default_depth")]
     pub default_depth: usize,
 }
@@ -85,7 +83,6 @@ fn default_boost_amount() -> f32 { 0.1 }
 fn default_penalty_factor() -> f32 { 0.8 }
 fn default_warn_threshold() -> f32 { 0.1 }
 
-fn default_vitality_floor() -> f32 { 0.05 }
 fn default_depth() -> usize { 1 }
 
 fn default_max_cluster_full_scan() -> usize { 100 }
@@ -121,7 +118,6 @@ impl Default for WeightConfig {
 impl Default for RecallConfig {
     fn default() -> Self {
         Self {
-            vitality_floor: default_vitality_floor(),
             default_depth: default_depth(),
         }
     }

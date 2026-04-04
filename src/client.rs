@@ -415,11 +415,10 @@ fn format_response(response: &Response, quiet: bool) {
             for result in results {
                 let display_name = truncate_name(&result.node_name, NAME_DISPLAY_CAP);
                 println!(
-                    "{:.4}  {:<width$}  w={:.2} v={:.2}  {}",
+                    "{:.4}  {:<width$}  w={:.2}  {}",
                     result.score,
                     display_name,
                     result.weight,
-                    result.vitality,
                     truncate_str(&result.abstract_text, 60),
                     width = name_width
                 );

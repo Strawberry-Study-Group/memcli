@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 
-use chrono::{Duration, Utc};
-
 use memcore::config::RecallConfig;
 use memcore::graph::Graph;
 use memcore::index::VectorIndex;
 use memcore::node::NodeMeta;
-use memcore::recall::{multi_recall, recall, vitality};
+use memcore::recall::{multi_recall, recall};
+
+use chrono::Utc;
 
 /// Helper: create a NodeMeta with given weight and abstract.
-/// Uses Utc::now() for timestamps and access_count=0 → vitality=1.0 (born hot).
 fn make_meta(name: &str, weight: f32, abstract_text: &str) -> NodeMeta {
     NodeMeta {
         name: name.to_string(),
@@ -25,104 +24,10 @@ fn make_meta(name: &str, weight: f32, abstract_text: &str) -> NodeMeta {
     }
 }
 
-/// Helper: create a NodeMeta with specific access history for vitality testing.
-fn make_meta_with_access(
-    name: &str,
-    weight: f32,
-    abstract_text: &str,
-    last_accessed: chrono::DateTime<Utc>,
-    access_count: u32,
-) -> NodeMeta {
-    NodeMeta {
-        name: name.to_string(),
-        created: Utc::now(),
-        updated: Utc::now(),
-        weight,
-        last_accessed,
-        access_count,
-        pinned: false,
-        links: vec![],
-        abstract_text: abstract_text.to_string(),
-        abstract_hash: 0,
-    }
-}
-
 fn default_config() -> RecallConfig {
     RecallConfig {
-        vitality_floor: 0.05,
         default_depth: 1,
     }
-}
-
-// ============================================================
-// Vitality function tests
-// ============================================================
-
-#[test]
-fn test_vitality_brand_new_node() {
-    // A node just created (last_accessed = now, access_count = 0) → vitality = 1.0
-    let meta = make_meta("fresh", 1.0, "new node");
-    let now = Utc::now();
-    let v = vitality(&meta, 0.05, now);
-    assert!(
-        (v - 1.0).abs() < 0.01,
-        "brand new node should have vitality ~1.0, got {}",
-        v
-    );
-}
-
-#[test]
-fn test_vitality_one_day_no_access() {
-    // 1 day old, never accessed → effective_age = 1 / (1 + ln(1)) = 1 / 1 = 1
-    // vitality = 1 / (1 + 1) = 0.5
-    let now = Utc::now();
-    let meta = make_meta_with_access("old", 1.0, "test", now - Duration::days(1), 0);
-    let v = vitality(&meta, 0.05, now);
-    assert!(
-        (v - 0.5).abs() < 0.01,
-        "1-day-old unaccessed node should have vitality ~0.5, got {}",
-        v
-    );
-}
-
-#[test]
-fn test_vitality_frequency_slows_decay() {
-    // Same age (1 day), but with access_count=10
-    // effective_age = 1 / (1 + ln(11)) ≈ 1 / (1 + 2.397) ≈ 0.294
-    // vitality = 1 / (1 + 0.294) ≈ 0.773
-    let now = Utc::now();
-    let meta_no_access = make_meta_with_access("no-access", 1.0, "test", now - Duration::days(1), 0);
-    let meta_frequent = make_meta_with_access("frequent", 1.0, "test", now - Duration::days(1), 10);
-
-    let v_no = vitality(&meta_no_access, 0.05, now);
-    let v_freq = vitality(&meta_frequent, 0.05, now);
-
-    assert!(
-        v_freq > v_no,
-        "frequently accessed node should have higher vitality: freq={}, no_access={}",
-        v_freq,
-        v_no
-    );
-}
-
-#[test]
-fn test_vitality_floor_clamp() {
-    // Very old node (365 days, no access) should not go below floor
-    let now = Utc::now();
-    let meta = make_meta_with_access("ancient", 1.0, "test", now - Duration::days(365), 0);
-    let floor = 0.05;
-    let v = vitality(&meta, floor, now);
-    assert!(
-        v >= floor,
-        "vitality {} should be >= floor {}",
-        v,
-        floor
-    );
-    assert!(
-        (v - floor).abs() < 0.01,
-        "very old node should be near floor: got {}",
-        v
-    );
 }
 
 // ============================================================
@@ -162,8 +67,8 @@ fn test_recall_single_node_exact_match() {
 
 #[test]
 fn test_recall_multiplicative_scoring_formula() {
-    // score = similarity × weight × vitality
-    // For a brand-new seed node: sim=1.0, weight=0.5, vitality≈1.0
+    // score = similarity × weight
+    // For a seed node: sim=1.0, weight=0.5 → score = 0.5
     let mut idx = VectorIndex::new();
     idx.insert("node-a", &[1.0, 0.0]).unwrap();
 
@@ -177,8 +82,8 @@ fn test_recall_multiplicative_scoring_formula() {
     let results = recall(&idx, &graph, &metas, &query, &config, 5, 1);
     assert_eq!(results.len(), 1);
 
-    // similarity = 1.0, weight = 0.5, vitality ≈ 1.0 → score ≈ 0.5
-    let expected_score = 1.0 * 0.5 * 1.0;
+    // similarity = 1.0, weight = 0.5 → score = 0.5
+    let expected_score = 1.0 * 0.5;
     assert!(
         (results[0].score - expected_score).abs() < 0.05,
         "expected ~{}, got {}",
@@ -189,7 +94,7 @@ fn test_recall_multiplicative_scoring_formula() {
 
 #[test]
 fn test_recall_multiplicative_zero_weight_kills_score() {
-    // weight=0 should make score=0 regardless of similarity or vitality
+    // weight=0 should make score=0 regardless of similarity
     let mut idx = VectorIndex::new();
     idx.insert("zero-weight", &[1.0, 0.0]).unwrap();
 
@@ -467,8 +372,6 @@ fn test_recall_result_fields() {
     assert_eq!(results[0].weight, 0.75);
     assert_eq!(results[0].abstract_text, "my abstract text");
     assert!((results[0].similarity - 1.0).abs() < 1e-6);
-    // Brand new node → vitality ≈ 1.0
-    assert!(results[0].vitality > 0.99);
 }
 
 #[test]

@@ -212,7 +212,7 @@ fn test_response_search_results() {
         score: 0.87,
         similarity: 0.94,
         weight: 0.95,
-        vitality: 1.0,
+
         abstract_text: "User preferences and settings".into(),
     }]));
     let bytes = encode_message(&resp).unwrap();

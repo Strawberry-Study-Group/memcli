@@ -108,8 +108,8 @@ export default {
         name: "memory_recall",
         label: "Memory Recall",
         description:
-          "Search through long-term memories using semantic similarity, trust weight, and vitality. " +
-          "Returns ranked results combining vector search, graph traversal, and multiplicative scoring (sim × weight × vitality). " +
+          "Search through long-term memories using semantic similarity and trust weight. " +
+          "Returns ranked results combining vector search, graph traversal, and multiplicative scoring (sim × weight). " +
           "Use this before starting any task to check if relevant knowledge already exists.",
         parameters: {
           type: "object",

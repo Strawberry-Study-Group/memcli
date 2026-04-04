@@ -28,13 +28,32 @@ Level 4:  memcore multi-recall "keyword" "synonym" --top-k 10  # max coverage
 - **Always start at Level 1.** Only escalate if results look irrelevant or empty.
 - **Rephrase with different vocabulary** — if "auth migration" returns nothing, try "OAuth2 upgrade" or "session store replacement"
 - **Use multi-recall** to combine a specific query with a broader one (e.g., `"Alice OAuth2 meeting"` + `"auth system changes"`)
-- After recall, **always `memcore get` the nodes** before using their content — the recall summary is for relevance ranking, not for answering questions
+- After recall, **always `memcore get` the nodes** before using their content — recall only returns names/abstracts, not full content. **Never answer a question using only the abstract** — the abstract is for ranking, the body has the full details.
+
+### `recall` vs `search`
+
+- **`recall`** = vector similarity + graph traversal + weight scoring. Best for general queries where following links to neighbors adds value.
+- **`search`** = pure vector similarity, no graph. Best for very specific queries (a person's name, an exact date, an error code) where you want the closest embedding match without graph noise.
+
+When a query is about a specific entity or date, try `search` first. When it's a broader topic, use `recall`.
+
+### Multi-query decomposition
+
+For complex questions that mention multiple entities or time periods, break them into sub-queries:
+
+```
+Question: "What did John do after losing his job in January?"
+Sub-query 1: memcore recall "John lost job January"        # find the job loss event
+Sub-query 2: memcore recall "John new career plans"        # find what came next
+```
+
+This gives better coverage than a single long query, because the embedding model compresses long queries into a single vector that may miss key terms.
 
 ## Node format
 
 ```yaml
 ---
-abstract: Dense summary with key dates, names, and 3–4 core facts (this gets embedded for search)
+abstract: Index of the body — key dates, names, facts that tell search what's inside (this gets embedded)
 links: [related-node]    # optional, bidirectional
 pinned: true              # optional, always in working memory
 ---
@@ -42,11 +61,17 @@ Body in markdown — full details, context, reasoning.
 ```
 
 **Abstract rules — this is critical for recall quality:**
-- Include **dates** (when it happened), **names** (people, projects, tools), and **key facts** (decisions, outcomes, numbers)
-- The abstract is the ONLY thing the vector index sees. If a fact isn't in the abstract, recall won't find it
+- The abstract is an **index of the body** — it tells vector search what facts are inside. If a fact isn't in the abstract, recall can't find it.
+- Include **dates**, **names** (people, projects, tools), and **key facts** (decisions, outcomes, numbers)
+- Think of it as: for every important fact in the body, can a search query find this node through the abstract?
 - Good: `"2026-03-15 meeting with Alice — decided to migrate auth to OAuth2, deadline April 1, blocked by legacy session store"`
-- Bad: `"Notes from a meeting about auth"`
-- Think of it as: if someone searches for any key detail, will this abstract match?
+- Bad: `"Notes from a meeting about auth"` — tells you nothing about what's inside
+
+**Detailed abstract rules:**
+1. **Always use absolute dates** — never "last week", "recently", "a few years ago". Convert relative dates using the node's timestamp. Always `"March 15, 2023"` or `"mid-March 2023"`. Relative dates are unresolvable in embeddings.
+2. **Keep abstracts under 60 tokens** — forces conciseness. The embedding model has a 512-token limit; long abstracts risk truncation of important facts at the end.
+3. **Include concrete entities** — proper names (people, places, projects), specific numbers, dates, and decisions. These are the recall anchors that differentiate one node from another.
+4. **Avoid semantic collision** — if many nodes share a theme (e.g., debugging, meetings, deployments), each abstract must lead with what makes *this* node different (the specific event, outcome, entity). Otherwise embeddings collide and recall retrieves the wrong node.
 
 Names: letters, digits, spaces, hyphens; 2-128 chars; start with a letter, end with letter/digit. Use descriptive names — they're prefix-searchable.
 
@@ -101,7 +126,7 @@ memcore multi-search "q1" "q2" [--top-k 5]       # multi-term vector search (wid
 memcore ls [--sort name|weight|date]
 ```
 
-Scoring: `score = similarity × weight × vitality` — multiplicative, no coefficients. New nodes start hot (vitality=1.0), decay with age, frequent access slows decay. Floor configurable via `vitality_floor` in memcore.toml.
+Scoring: `score = similarity × weight` — multiplicative, no coefficients. Trust (weight) is the only agent-controlled signal; no time-based decay.
 
 ### Graph & feedback
 ```bash

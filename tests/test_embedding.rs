@@ -172,53 +172,47 @@ fn test_batch_compute_consistency() {
 }
 
 /// Verify that the model detects whether token_type_ids is accepted.
-/// Our bundled e5-small model has 3 inputs (including token_type_ids).
+/// Our bundled bge-small model has 3 inputs (including token_type_ids).
 #[test]
 fn test_model_detects_token_type_ids() {
     let model = EmbeddingModel::load(&models_dir()).unwrap();
-    // The bundled e5-small ONNX model accepts token_type_ids
+    // The bundled bge-small ONNX model accepts token_type_ids
     assert!(
         model.has_token_type_ids,
-        "bundled e5-small model should have token_type_ids input"
+        "bundled bge-small model should have token_type_ids input"
     );
 }
 
-/// Verify that compute works regardless of token_type_ids presence.
-/// This is a regression test: before the fix, models without token_type_ids
-/// would fail with "3 inputs provided but model only accepts 2".
+/// Verify that compute works when token_type_ids is detected as present.
+/// The bundled bge-small model requires token_type_ids, so it should
+/// be correctly detected and passed during inference.
 #[test]
 fn test_compute_works_with_token_type_ids_flag() {
     let mut model = EmbeddingModel::load(&models_dir()).unwrap();
 
-    // Compute should succeed whether has_token_type_ids is true or false.
-    // Test the true path (our bundled model).
+    // The bundled bge-small model requires token_type_ids.
     assert!(model.has_token_type_ids);
     let dims = model.dimensions;
     let emb = model.compute_passage("token type ids test").unwrap();
     assert_eq!(emb.len(), dims);
 
-    // Force the false path: even though the model actually accepts it,
-    // e5 models work correctly without token_type_ids (all zeros = default).
-    model.has_token_type_ids = false;
-    let emb_without = model.compute_passage("token type ids test").unwrap();
-    assert_eq!(emb_without.len(), dims);
-
-    // Both paths should produce valid normalized embeddings
-    let norm: f32 = emb_without.iter().map(|x| x * x).sum::<f32>().sqrt();
+    // Verify embedding is normalized
+    let norm: f32 = emb.iter().map(|x| x * x).sum::<f32>().sqrt();
     assert!(
         (norm - 1.0).abs() < 0.01,
-        "embedding without token_type_ids not normalized: norm={}",
+        "embedding not normalized: norm={}",
         norm
     );
 
-    // For e5-small, token_type_ids are all zeros anyway, so results
-    // should be very similar (though not necessarily identical due to
-    // ONNX graph differences)
-    let sim = cosine(&emb, &emb_without);
+    // For models that require token_type_ids (like bge-small), forcing
+    // has_token_type_ids=false will cause an error. This is expected
+    // behavior — the flag correctly controls whether token_type_ids
+    // is passed to the model.
+    model.has_token_type_ids = false;
+    let result = model.compute_passage("token type ids test");
     assert!(
-        sim > 0.99,
-        "with/without token_type_ids should be near-identical for e5: sim={}",
-        sim
+        result.is_err(),
+        "bge-small should fail without token_type_ids"
     );
 }
 

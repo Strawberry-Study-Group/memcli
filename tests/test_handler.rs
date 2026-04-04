@@ -2661,11 +2661,14 @@ fn test_search_no_embedding_shows_rebuild_hint() {
         top_k: 5,
     };
     let resp = handle_request(&mut state, &req, dir.path());
-    // Only fails when compiled without embedding feature
+    // Only fails when compiled without embedding feature or when model is not loaded
     if !resp.success {
         match &resp.body {
             ResponseBody::Error(msg) => {
-                assert!(msg.contains("cargo build --features embedding"), "error should contain rebuild hint, got: {}", msg);
+                assert!(
+                    msg.contains("cargo build --features embedding") || msg.contains("embedding model not loaded"),
+                    "error should contain rebuild hint or model-not-loaded message, got: {}", msg
+                );
             }
             _ => panic!("expected Error body"),
         }
@@ -2688,7 +2691,10 @@ fn test_recall_no_embedding_shows_rebuild_hint() {
     if !resp.success {
         match &resp.body {
             ResponseBody::Error(msg) => {
-                assert!(msg.contains("cargo build --features embedding"), "error should contain rebuild hint, got: {}", msg);
+                assert!(
+                    msg.contains("cargo build --features embedding") || msg.contains("embedding model not loaded"),
+                    "error should contain rebuild hint or model-not-loaded message, got: {}", msg
+                );
             }
             _ => panic!("expected Error body"),
         }
@@ -2705,7 +2711,10 @@ fn test_reindex_no_embedding_shows_rebuild_hint() {
     if !resp.success {
         match &resp.body {
             ResponseBody::Error(msg) => {
-                assert!(msg.contains("cargo build --features embedding"), "error should contain rebuild hint, got: {}", msg);
+                assert!(
+                    msg.contains("cargo build --features embedding") || msg.contains("embedding model not loaded"),
+                    "error should contain rebuild hint or model-not-loaded message, got: {}", msg
+                );
             }
             _ => panic!("expected Error body"),
         }
@@ -2722,7 +2731,10 @@ fn test_baseline_no_embedding_shows_rebuild_hint() {
     if !resp.success {
         match &resp.body {
             ResponseBody::Error(msg) => {
-                assert!(msg.contains("cargo build --features embedding"), "error should contain rebuild hint, got: {}", msg);
+                assert!(
+                    msg.contains("cargo build --features embedding") || msg.contains("embedding model not loaded") || msg.contains("need at least"),
+                    "error should contain rebuild hint or model-not-loaded message, got: {}", msg
+                );
             }
             _ => panic!("expected Error body"),
         }

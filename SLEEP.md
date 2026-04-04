@@ -9,18 +9,26 @@ You are a memory librarian. You work during idle time — no user is waiting.
 
 **Critical rule: Do no harm.** If you're unsure whether a change helps recall, don't make it. Leaving redundancy is safer than scrambling embeddings. The worst outcome is a sleep that *hurts* recall — never let that happen.
 
+**Enrichment vs. differentiation:**
+- **Enrichment** (GOOD): adding missing facts from body to abstract. Makes the node more findable.
+- **Differentiation** (BANNED): rewriting abstracts to reduce similarity to other nodes. Shifts embeddings unpredictably, breaks recall. Prior benchmarks showed -20% multi-hop and -19% open-domain accuracy from differentiation.
+
 ---
 
 ## Process Overview
 
 ```
-1. Scan           memcore inspect --format json
-2. Fix Pairs      for each similar_pair > 0.95: merge or delete (NEVER rewrite abstracts)
-3. Fix Graph      for each orphan: link or delete. For each hub: split
-4. Build Indexes  create index nodes for clusters; fix abstracts to be navigational, not fact-bearing
-5. Cleanup        memcore gc
-6. Verify         memcore inspect --format json — confirm improvements
+1. Scan              memcore inspect --format json
+2. Fix Pairs         similar_pairs > 0.95: merge or delete (NEVER rewrite abstracts to differentiate)
+3. Enrich Abstracts  make each abstract an index of its body (MANDATORY)
+4. Fix Graph         for each orphan: link or delete. For each hub: split
+5. Build Indexes     create index nodes for clusters; fix abstracts to be navigational, not fact-bearing
+6. Cleanup           memcore gc
+7. Verify            memcore inspect --format json — confirm improvements
 ```
+
+Steps 2, 4: skip if health > 0.8, no pairs > 0.95, no orphans.
+Step 3: always run.
 
 ---
 
@@ -127,7 +135,22 @@ Work top-down (highest similarity first). After resolving a pair, the remaining 
 
 ---
 
-## Step 3: Fix Graph Balance
+## Step 3: Enrich Abstracts (MANDATORY)
+
+**The abstract is an index of the body.** It tells vector search what facts are inside. If a fact is in the body but not the abstract, recall can't find it.
+
+For each node, read the body and check whether the abstract covers:
+- **Proper nouns** — people, places, projects, tools mentioned in the body
+- **Dates** — convert any relative dates ("last week") to absolute using the node's timestamp
+- **Decisions/outcomes** — key events, results, state changes
+
+If important facts are missing, update the abstract to include them. Keep abstracts under 60 tokens. Lead with the most distinctive fact. **Do not modify the body — only the abstract.**
+
+After enriching, run `memcore inspect --format json` to verify no new pairs appeared above 0.95.
+
+---
+
+## Step 4: Fix Graph Balance
 
 Three sub-problems, handle in order.
 
@@ -223,11 +246,11 @@ memcore get <low-weight-node>
 
 ---
 
-## Step 4: Build Index Nodes
+## Step 5: Build Index Nodes
 
 After fixing pairs and graph balance, create index nodes for clusters that lack one. Index nodes are lightweight entry points — recall hits the index, then the agent follows its links to find the whole cluster.
 
-### 4a. Identify clusters that need an index
+### 5a. Identify clusters that need an index
 
 ```bash
 memcore inspect --format json
@@ -239,7 +262,7 @@ Look at `cluster_count` and the graph structure. A cluster needs an index when:
 
 Small clusters (< 7 nodes) don't need an index — the nodes are close enough to find directly via recall.
 
-### 4b. For each cluster, create an index node
+### 5b. For each cluster, create an index node
 
 ```bash
 # 1. Pick a node in the cluster and explore it
@@ -260,7 +283,7 @@ links: [node1, node2, node3]
 EOF
 ```
 
-### 4c. Index node abstract rules
+### 5c. Index node abstract rules
 
 **Critical:** Index node abstracts must NOT compete with their children for recall slots. Write abstracts that describe the *group structure*, not the *topic content*.
 
@@ -272,7 +295,7 @@ Good abstract (navigational, won't steal fact queries):
 
 The abstract should make the index discoverable for broad navigation queries ("what do I know about James's pets?") but NOT match specific fact queries ("when did James adopt Ned?"). Specific facts belong in the child nodes' abstracts.
 
-### 4d. Other index node rules
+### 5d. Other index node rules
 
 - Name always starts with `"index - "` so they are findable via `memcore recall --name "index"`
 - Links to every node in the group (the index is the hub, so each member is 1 hop away)
@@ -285,7 +308,7 @@ memcore link "index - [topic]" <new-node>
 memcore patch "index - [topic]" --append "- **new-node** — [description]"
 ```
 
-### 4e. Fix existing index nodes with bad abstracts
+### 5e. Fix existing index nodes with bad abstracts
 
 If existing index nodes have abstracts that are too topically specific (they'd match the same queries as their children), rewrite the abstract to be navigational:
 
@@ -303,7 +326,7 @@ EOF
 
 This triggers automatic re-embedding, so the index node will move away from its children in vector space.
 
-### 4f. Update stale indexes
+### 5f. Update stale indexes
 
 Check existing index nodes. If any of their linked nodes were deleted or merged in earlier steps:
 
@@ -322,7 +345,7 @@ EOF
 
 ---
 
-## Step 5: Cleanup
+## Step 6: Cleanup
 
 ```bash
 memcore gc
@@ -332,7 +355,7 @@ Removes any dangling references left over from deletions.
 
 ---
 
-## Step 6: Verify
+## Step 7: Verify
 
 ```bash
 memcore inspect --format json

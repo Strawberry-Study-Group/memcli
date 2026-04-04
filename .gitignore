@@ -7,7 +7,8 @@ wal.log
 .daemon.pid
 benchmarks/data/
 benchmarks/results/
-models/model_quantized.onnx
+memcore_tests/data/
+memcore_tests/results/
 design.md
 CLAUDE.md 
 benchmarks

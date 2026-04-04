@@ -7,6 +7,7 @@ use crate::daemon_state::{save_graph_idx, DaemonState};
 /// Maximum links shown in `get` output before truncation (supernode protection, design §6.2).
 const SUPERNODE_LINK_CAP: usize = 20;
 use crate::feedback;
+use crate::index::VectorIndex;
 use crate::node::{self, NodeMeta, PatchOp};
 use crate::protocol::*;
 use crate::wal::WalOp;
@@ -944,7 +945,6 @@ fn handle_search(
                     score: hit.similarity,
                     similarity: hit.similarity,
                     weight: meta.map(|m| m.weight).unwrap_or(0.0),
-                    vitality: 0.0,
                     abstract_text: meta
                         .map(|m| m.abstract_text.clone())
                         .unwrap_or_default(),
@@ -996,7 +996,6 @@ fn handle_multi_search(
                     score: hit.similarity,
                     similarity: hit.similarity,
                     weight: meta.map(|m| m.weight).unwrap_or(0.0),
-                    vitality: 0.0,
                     abstract_text: meta
                         .map(|m| m.abstract_text.clone())
                         .unwrap_or_default(),
@@ -1057,7 +1056,6 @@ fn handle_multi_recall(
                     score: r.score,
                     similarity: r.similarity,
                     weight: r.weight,
-                    vitality: r.vitality,
                     abstract_text: r.abstract_text,
                 })
                 .collect();
@@ -1127,7 +1125,6 @@ fn handle_recall(
                         score: r.score,
                         similarity: r.similarity,
                         weight: r.weight,
-                        vitality: r.vitality,
                         abstract_text: r.abstract_text,
                     })
                     .collect();
@@ -1193,7 +1190,6 @@ fn names_to_search_results(
                 score: meta.map(|m| m.weight).unwrap_or(0.0),
                 similarity: 0.0,
                 weight: meta.map(|m| m.weight).unwrap_or(0.0),
-                vitality: 0.0,
                 abstract_text: meta.map(|m| m.abstract_text.clone()).unwrap_or_default(),
             }
         })

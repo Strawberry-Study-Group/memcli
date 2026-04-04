@@ -19,21 +19,7 @@ fn test_default_weight_config() {
 #[test]
 fn test_default_recall_config() {
     let cfg = RecallConfig::default();
-    assert!((cfg.vitality_floor - 0.05).abs() < f32::EPSILON);
     assert_eq!(cfg.default_depth, 1);
-}
-
-#[test]
-fn test_recall_config_vitality_floor_from_toml() {
-    let dir = TempDir::new().unwrap();
-    let path = dir.path().join("memcore.toml");
-    std::fs::write(&path, r#"
-[recall]
-vitality_floor = 0.10
-"#).unwrap();
-
-    let cfg = load_config_from(&path);
-    assert!((cfg.recall.vitality_floor - 0.10).abs() < f32::EPSILON);
 }
 
 #[test]
@@ -74,9 +60,6 @@ boost_amount = 0.2
 penalty_factor = 0.5
 warn_threshold = 0.05
 
-[recall]
-vitality_floor = 0.10
-
 [daemon]
 idle_timeout_minutes = 60
 port = 9999
@@ -85,7 +68,6 @@ port = 9999
     let cfg = load_config_from(&path);
     assert!((cfg.weight.boost_amount - 0.2).abs() < f32::EPSILON);
     assert!((cfg.weight.penalty_factor - 0.5).abs() < f32::EPSILON);
-    assert!((cfg.recall.vitality_floor - 0.10).abs() < f32::EPSILON);
     assert_eq!(cfg.daemon.idle_timeout_minutes, 60);
     assert_eq!(cfg.daemon.port, 9999);
 }
@@ -103,7 +85,6 @@ boost_amount = 0.3
     assert!((cfg.weight.boost_amount - 0.3).abs() < f32::EPSILON);
     // Rest should be defaults
     assert!((cfg.weight.penalty_factor - 0.8).abs() < f32::EPSILON);
-    assert!((cfg.recall.vitality_floor - 0.05).abs() < f32::EPSILON);
     assert_eq!(cfg.daemon.idle_timeout_minutes, 30);
 }
 
