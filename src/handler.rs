@@ -7,6 +7,7 @@ use crate::daemon_state::{save_graph_idx, DaemonState};
 /// Maximum links shown in `get` output before truncation (supernode protection, design §6.2).
 const SUPERNODE_LINK_CAP: usize = 20;
 use crate::feedback;
+#[cfg(feature = "embedding")]
 use crate::index::VectorIndex;
 use crate::node::{self, NodeMeta, PatchOp};
 use crate::protocol::*;

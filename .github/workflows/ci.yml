@@ -20,11 +20,6 @@ jobs:
       - name: Run tests
         run: cargo test
 
-      - name: Install ONNX Runtime
-        run: |
-          pip install onnxruntime
-          echo "ORT_DYLIB_PATH=$(python3 -c 'import onnxruntime; import os; print(os.path.join(os.path.dirname(onnxruntime.__file__), "capi", "libonnxruntime.so"))')" >> $GITHUB_ENV
-
       - name: Run tests (with embedding)
         run: cargo test --features embedding
 
