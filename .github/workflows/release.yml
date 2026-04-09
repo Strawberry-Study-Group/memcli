@@ -8,20 +8,21 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             name: memcore-Linux-x86_64
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            name: memcore-Darwin-x86_64
+            embedding: true
           - target: aarch64-apple-darwin
             os: macos-latest
             name: memcore-Darwin-arm64
+            embedding: false
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             name: memcore-Windows-x86_64.exe
+            embedding: false
 
     runs-on: ${{ matrix.os }}
 
@@ -33,7 +34,13 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Build
-        run: cargo build --release --features embedding --target ${{ matrix.target }}
+        shell: bash
+        run: |
+          if [ "${{ matrix.embedding }}" = "true" ]; then
+            cargo build --release --features embedding --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
 
       - name: Package release archive
         shell: bash
