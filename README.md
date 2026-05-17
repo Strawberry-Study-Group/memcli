@@ -59,6 +59,27 @@ Vector search finds seed nodes. BFS traversal through the knowledge graph pulls 
 
 ---
 
+## Benchmarks
+
+MemCore was evaluated on [**LoCoMo**](https://snap-research.github.io/locomo/) (Long-term Conversational Memory — Snap Research, ACL 2024): 1,540 QA pairs across 10 multi-session conversations.
+
+> **90.7% LLM-judge accuracy** with a **98.4% evidence retrieval rate** — using retrieval-based access (vector + graph recall), not full context.
+
+| System | Year | LoCoMo accuracy |
+|---|---|---|
+| EverMemOS | 2026 | 92.3% |
+| MemMachine v0.2 | 2025 | 91.2% |
+| **MemCore** | **2026** | **90.7%** |
+| Backboard | 2025 | 90.0% |
+| Zep | 2024 | 75.1% |
+| Letta / MemGPT | 2025 | 74.0% |
+| Mem0 Graph | 2024 | 68.5% |
+| OpenAI Memory | 2024 | 52.9% |
+
+LLM-as-a-Judge accuracy on categories 1–4, the standard LoCoMo evaluation protocol. MemCore ranks among the top memory systems on the leaderboard while running 100% locally on a ~40 MB binary. See [`EXPERIMENT_REPORT.md`](EXPERIMENT_REPORT.md) for the full methodology, per-category breakdown, and sleep-consolidation analysis.
+
+---
+
 ## Roadmap
 
 - [ ] Build and test on macOS and Windows
